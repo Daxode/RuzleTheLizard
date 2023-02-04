@@ -24,17 +24,16 @@ public partial class ThirdPersonPlayerInputsSystem : SystemBase
         foreach (var (playerInputs, player) in SystemAPI.Query<RefRW<ThirdPersonPlayerInputs>, ThirdPersonPlayer>())
         {
             playerInputs.ValueRW.MoveInput = new float2();
-            playerInputs.ValueRW.MoveInput.y += Input.GetKey(KeyCode.W) ? 1f : 0f;
-            playerInputs.ValueRW.MoveInput.y += Input.GetKey(KeyCode.S) ? -1f : 0f;
-            playerInputs.ValueRW.MoveInput.x += Input.GetKey(KeyCode.D) ? 1f : 0f;
-            playerInputs.ValueRW.MoveInput.x += Input.GetKey(KeyCode.A) ? -1f : 0f;
+            playerInputs.ValueRW.MoveInput.y += Input.GetAxisRaw("Vertical");
+            playerInputs.ValueRW.MoveInput.x += Input.GetAxisRaw("Horizontal");
             
             playerInputs.ValueRW.CameraLookInput = new float2(Input.GetAxis("Mouse X"), Input.GetAxis("Mouse Y"));
             playerInputs.ValueRW.CameraZoomInput = -Input.mouseScrollDelta.y;
+            playerInputs.ValueRW.CameraZoomInput -= Input.GetAxis("Zoom")*0.2f;
             
             // For button presses that need to be queried during fixed update, use the "FixedInputEvent" helper struct.
             // This is part of a strategy for proper handling of button press events that are consumed during the fixed update group
-            if (Input.GetKeyDown(KeyCode.Space))
+            if (Input.GetButtonDown("Jump"))
             {
                 playerInputs.ValueRW.JumpPressed.Set(fixedTick);
             }

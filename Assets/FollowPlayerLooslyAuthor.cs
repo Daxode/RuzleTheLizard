@@ -58,7 +58,7 @@ partial struct FollowPlayerLooslySystem : ISystem {
                 if (math.abs(pos.y - playerTransform.Position.y) > 0.5f) {
                     desiredPos.y = math.lerp(pos.y, playerTransform.Position.y + 1.5f, 0.1f);
                 }
-                transform.ValueRW.Position = math.lerp(transform.ValueRO.Position, desiredPos, 0.5f);
+                transform.ValueRW.Position = math.lerp(transform.ValueRO.Position, desiredPos, 0.2f);
             }
 
             if (!shouldCauseTransition)
