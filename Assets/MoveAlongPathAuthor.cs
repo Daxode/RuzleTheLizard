@@ -8,6 +8,7 @@ using Unity.Physics;
 using Unity.Physics.Systems;
 using Unity.Transforms;
 using Rival;
+using Unity.Burst;
 
 public class MoveAlongPathAuthor : MonoBehaviour
 {
@@ -64,9 +65,12 @@ struct Speed : IComponentData {
 
 // Update in physics group
 [UpdateInGroup(typeof(FixedStepSimulationSystemGroup))]
+[BurstCompile]
 public partial struct MoveAlongPathSystem : ISystem {
     public void OnCreate(ref SystemState state){}
     public void OnDestroy(ref SystemState state){}
+
+    [BurstCompile]
     public void OnUpdate(ref SystemState state){
         foreach (var (positions, vel, transform, speed, physicsMass) in SystemAPI.Query<DynamicBuffer<FollowPoint>, RefRW<PhysicsVelocity>, RefRO<LocalTransform>, RefRO<Speed>, RefRO<PhysicsMass>>()) {
             var interp = (float)math.sin(SystemAPI.Time.ElapsedTime * math.PI * speed.ValueRO.Value) * 0.5f + 0.5f;
@@ -101,7 +105,7 @@ public partial struct MoveAlongPathSystem : ISystem {
             vel.ValueRW = PhysicsVelocity.CalculateVelocityToTarget(in physicsMass.ValueRO, in transform.ValueRO.Position, in transform.ValueRO.Rotation, in rigidTransform, 1f/SystemAPI.Time.DeltaTime);
 
             // debug draw the current position
-            Debug.DrawLine(transform.ValueRO.Position, position, Color.red, SystemAPI.Time.DeltaTime);
+            //Debug.DrawLine(transform.ValueRO.Position, position, Color.red, SystemAPI.Time.DeltaTime);
         }
     }
 }
