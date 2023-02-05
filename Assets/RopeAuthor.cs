@@ -39,8 +39,8 @@ public partial struct RopeSystem : ISystem
             // move the rope
             foreach (var ropeRef in SystemAPI.Query<RefRW<RopeInfo>>()) {
                 ref var rope = ref ropeRef.ValueRW;
-                rope.Start += math.up() * 0.1f;
-                rope.End -= math.up() * 0.1f;
+                rope.Start += math.up() * 0.5f;
+                rope.End -= 0.6f;
             }
         }
 
@@ -90,6 +90,42 @@ public partial struct RopeSystem : ISystem
                 indices[index + 2] = job.Vertices.Length - 1 - i;
             }
 
+            // create bone weights
+            var boneWeights = new NativeArray<BoneWeight>(job.Vertices.Length, Allocator.TempJob);
+            for (int i = 0; i < job.Vertices.Length; i++)
+            {
+                var boneIndex0 = i / job.VerticesPerRing / 2;
+
+                boneWeights[i] = new BoneWeight
+                {
+                    weight0 = 1f,
+                    weight1 = 0f,
+                    weight2 = 0f,
+                    weight3 = 0f,
+                    boneIndex0 = boneIndex0,
+                    boneIndex1 = 0,
+                    boneIndex2 = 0,
+                    boneIndex3 = 0
+                };
+            }
+
+            // create bones
+            var bones = new Transform[job.RingCount/2];
+            for (int i = 0; i < job.RingCount/2; i++)
+            {
+                var bone = new GameObject("Bone " + i);
+                bone.transform.position = job.Vertices[i * 2 * job.VerticesPerRing];
+                bones[i] = bone.transform;
+            }
+            
+
+            // create bind poses
+            var bindPoses = new NativeArray<Matrix4x4>(job.RingCount/2, Allocator.TempJob);
+            for (int i = 0; i < job.RingCount/2; i++)
+            {
+                bindPoses[i] = bones[i].worldToLocalMatrix;
+            }
+
             // generate mesh
             var mesh = new Mesh();
             mesh.MarkDynamic();
@@ -98,19 +134,20 @@ public partial struct RopeSystem : ISystem
             mesh.SetIndices(indices, MeshTopology.Triangles, 0);
             mesh.RecalculateNormals();
             mesh.RecalculateBounds();
-            indices.Dispose();
-            job.Vertices.Dispose();
+            mesh.boneWeights = boneWeights.ToArray();
+            mesh.bindposes = bindPoses.ToArray();
 
             // Draw the mesh
             var go = new GameObject("Rope");
-            var mf = go.AddComponent<MeshFilter>();
-            mf.mesh = mesh;
-            var mr = go.AddComponent<MeshRenderer>();
+            // var mf = go.AddComponent<MeshFilter>();
+            // mf.mesh = mesh;
+            var mr = go.AddComponent<SkinnedMeshRenderer>();
             // get urp material
             var urp = UnityEngine.Rendering.Universal.UniversalRenderPipeline.asset;
-            var mat = urp.defaultMaterial;
-            mr.material = mat;
+            mr.material = urp.defaultMaterial;
+            mr.sharedMesh = mesh;
             mr.material.color = new Color(0.5f, 0.3f, 0.1f);
+            mr.bones = bones;
 
             // draw all verts
             // for (int i = 0; i < job.Vertices.Length; i++)
@@ -118,64 +155,12 @@ public partial struct RopeSystem : ISystem
             //     Debug.DrawLine(job.Vertices[i], job.Vertices[i] + math.up() * 0.14f, Color.red, 20f);
             // }
             //job.Vertices.Dispose();
+            indices.Dispose();
+            job.Vertices.Dispose();
+            boneWeights.Dispose();
+            bindPoses.Dispose();
             Debug.Log("Rope vertices generated");
         }
-
-
-        // var ecb = SystemAPI.GetSingleton<EndInitializationEntityCommandBufferSystem.Singleton>().CreateCommandBuffer(World.Unmanaged);
-        // foreach (var (rope, transform) in SystemAPI.Query<Rope, Transform>())
-        // {
-        //     if (rope.Mesh == null)
-        //     {
-        //         rope.Mesh = new Mesh();
-        //         rope.Mesh.MarkDynamic();
-        //         rope.Mesh.name = "Rope Mesh";
-        //         rope.MeshFilter.mesh = rope.Mesh;
-        //     }
-
-        //     var job = new MyJob
-        //     {
-        //         N = rope.N,
-        //         radius = rope.Radius,
-        //         capRadius = rope.CapRadius,
-        //         start = rope.Start,
-        //         end = rope.End,
-        //         vertices = new NativeArray<float3>(rope.N * 2 + 2, Allocator.TempJob)
-        //     };
-
-        //     job.Schedule(rope.N + 2, 1).Complete();
-
-        //     var vertices = new NativeArray<Vector3>(job.vertices.Length, Allocator.TempJob);
-        //     for (int i = 0; i < job.vertices.Length; i++)
-        //     {
-        //         vertices[i] = job.vertices[i];
-        //     }
-
-        //     rope.Mesh.SetVertices(vertices);
-        //     vertices.Dispose();
-
-        //     var triangles = new NativeArray<int>(rope.N * 2 * 3, Allocator.TempJob);
-        //     for (int i = 0; i < rope.N; i++)
-        //     {
-        //         // start cap
-        //         triangles[i * 6 + 0] = 0;
-        //         triangles[i * 6 + 1] = i + 1;
-        //         triangles[i * 6 + 2] = i + 2;
-
-        //         // end cap
-        //         triangles[i * 6 + 3] = rope.N + 1;
-        //         triangles[i * 6 + 4] = rope.N + 2 + i;
-        //         triangles[i * 6 + 5] = rope.N + 3 + i;
-
-        //         // side
-        //         triangles[rope.N * 6 + i * 6 + 0] = i + 1;
-        //         triangles[rope.N * 6 + i * 6 + 1] = rope.N + 2 + i;
-        //         triangles[rope.N * 6 + i * 6 + 2] = rope.N + 3 + i;
-
-        //         triangles[rope.N * 6 + i * 6 + 3] = i + 1;
-        //         triangles[rope.N * 6 + i * 6 + 4] = rope.N + 3 + i;
-        //         triangles[rope.N * 6 + i * 6 + 5] = i + 2;
-        //     }
     }
 }
 
@@ -202,7 +187,7 @@ struct GenerateRopeVerticesJob : IJobFor {
     public readonly int VertexCount => vertices.Length;
 
     public readonly int IndexCount => RingCount * VerticesPerRing * 6;
-    public readonly int IndexCountCaps => RingCount * 6;
+    public readonly int IndexCountCaps => (VerticesPerRing-1) * 2 * 3;
 
     public GenerateRopeVerticesJob(float3 start, float3 end, int segmentCount = 4, int verticesPerRing = 5, float middleRadius = 0.1f, float capRadius = 0.05f, float deltaOut = 0.1f) {
         this.start = start;
