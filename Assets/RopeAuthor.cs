@@ -94,7 +94,9 @@ public partial struct RopeSystem : ISystem
             var boneWeights = new NativeArray<BoneWeight>(job.Vertices.Length, Allocator.TempJob);
             for (int i = 0; i < job.Vertices.Length; i++)
             {
-                var boneIndex0 = i / job.VerticesPerRing / 2;
+                var ringIndex = i/job.VerticesPerRing;
+                var segmentIndex = (ringIndex-1)/2;
+                var boneIndex0 = segmentIndex;
 
                 boneWeights[i] = new BoneWeight
                 {
@@ -102,7 +104,7 @@ public partial struct RopeSystem : ISystem
                     weight1 = 0f,
                     weight2 = 0f,
                     weight3 = 0f,
-                    boneIndex0 = boneIndex0,
+                    boneIndex0 = math.clamp(boneIndex0, 0, job.SegmentCount-2),
                     boneIndex1 = 0,
                     boneIndex2 = 0,
                     boneIndex3 = 0
@@ -110,21 +112,19 @@ public partial struct RopeSystem : ISystem
             }
 
             // create bones
-            var bones = new Transform[job.RingCount/2];
-            for (int i = 0; i < job.RingCount/2; i++)
+            var bones = new Transform[job.SegmentCount-1];
+            for (int i = 0; i < bones.Length; i++)
             {
                 var bone = new GameObject("Bone " + i);
-                bone.transform.position = job.Vertices[i * 2 * job.VerticesPerRing];
+                bone.transform.position = math.lerp(rope.Start, rope.End, (float)i/bones.Length);
                 bones[i] = bone.transform;
+                //Debug.DrawLine(bone.transform.position, bone.transform.position + Vector3.up, Color.red, 10f);
             }
-            
 
             // create bind poses
-            var bindPoses = new NativeArray<Matrix4x4>(job.RingCount/2, Allocator.TempJob);
-            for (int i = 0; i < job.RingCount/2; i++)
-            {
+            var bindPoses = new NativeArray<Matrix4x4>(bones.Length, Allocator.TempJob);
+            for (int i = 0; i < bones.Length; i++)
                 bindPoses[i] = bones[i].worldToLocalMatrix;
-            }
 
             // generate mesh
             var mesh = new Mesh();
@@ -133,7 +133,7 @@ public partial struct RopeSystem : ISystem
             mesh.SetVertices(job.Vertices);
             mesh.SetIndices(indices, MeshTopology.Triangles, 0);
             mesh.RecalculateNormals();
-            mesh.RecalculateBounds();
+            mesh.bounds = new Bounds(Vector3.zero, Vector3.one * 1000f);
             mesh.boneWeights = boneWeights.ToArray();
             mesh.bindposes = bindPoses.ToArray();
 
@@ -167,7 +167,7 @@ public partial struct RopeSystem : ISystem
 // Create cylinder verts job
 [Unity.Burst.BurstCompile]
 struct GenerateRopeVerticesJob : IJobFor {
-    readonly int SegmentCount; // number of segments
+    public readonly int SegmentCount; // number of segments
     public readonly int RingCount => SegmentCount * 2;
     readonly int verticesPerRing;
     public readonly int VerticesPerRing => verticesPerRing;
