@@ -3,7 +3,8 @@ using UnityEngine;
 using Unity.Mathematics;
 using Unity.Collections;
 using Unity.Jobs;
-
+using Unity.Rendering;
+using Unity.Transforms;
 
 class RopeAuthor : MonoBehaviour
 {
@@ -43,6 +44,8 @@ public partial struct RopeSystem : ISystem
                 rope.End -= 0.6f;
             }
         }
+
+        var ecb = SystemAPI.GetSingleton<EndSimulationEntityCommandBufferSystem.Singleton>().CreateCommandBuffer(state.WorldUnmanaged);
 
         foreach (var ropeRef in SystemAPI.Query<RefRO<RopeInfo>>().WithChangeFilter<RopeInfo>())
         {
@@ -125,6 +128,23 @@ public partial struct RopeSystem : ISystem
             var bindPoses = new NativeArray<Matrix4x4>(bones.Length, Allocator.TempJob);
             for (int i = 0; i < bones.Length; i++)
                 bindPoses[i] = bones[i].worldToLocalMatrix;
+
+            // // create bone entities
+            // var boneEntities = new NativeArray<Entity>(bones.Length, Allocator.TempJob);
+            // var boneArchetypeComponentList = new FixedList128Bytes<ComponentType> {
+            //     ComponentType.ReadOnly<LocalToWorld>(), 
+            //     ComponentType.ReadOnly<LocalTransform>(),
+            //     ComponentType.ReadOnly<CompanionLink>()
+            // }.ToNativeArray(state.WorldUpdateAllocator);
+            // var boneArchetype = state.EntityManager.CreateArchetype(boneArchetypeComponentList);
+
+            // for (int i = 0; i < bones.Length; i++){
+            //     boneEntities[i] = state.EntityManager.CreateEntity(boneArchetype);
+            //     state.EntityManager.SetComponentData(boneEntities[i], new LocalToWorld{Value = bones[i].localToWorldMatrix});
+            //     state.EntityManager.SetName(boneEntities[i], bones[i].name);
+            //     state.EntityManager.SetComponentData(boneEntities[i], LocalTransform.FromMatrix(bones[i].localToWorldMatrix));
+            //     state.EntityManager.GetComponentObject<CompanionLink>(boneEntities[i]).Companion = bones[i].gameObject;
+            // }
 
             // generate mesh
             var mesh = new Mesh();
