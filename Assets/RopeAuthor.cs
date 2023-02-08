@@ -5,6 +5,7 @@ using Unity.Collections;
 using Unity.Jobs;
 using Unity.Rendering;
 using Unity.Transforms;
+using Unity.Physics;
 
 class RopeAuthor : MonoBehaviour
 {
@@ -22,12 +23,21 @@ class RopeAuthor : MonoBehaviour
             });
         }
     }
+
+    void OnDrawGizmos()
+    {
+        Gizmos.color = Color.red;
+        Gizmos.DrawSphere(Start, 0.1f);
+        Gizmos.DrawSphere(End, 0.1f);
+        Gizmos.DrawLine(Start, End);
+    }
 }
 
 struct RopeInfo : IComponentData
 {
     public float3 Start;
     public float3 End;
+    public float Length() => math.distance(Start, End);
 }
 
 public partial struct RopeSystem : ISystem
@@ -118,8 +128,9 @@ public partial struct RopeSystem : ISystem
             var bones = new Transform[job.SegmentCount-1];
             for (int i = 0; i < bones.Length; i++)
             {
-                var bone = new GameObject("Bone " + i);
+                var bone = new GameObject("Rope bone " + i);
                 bone.transform.position = math.lerp(rope.Start, rope.End, (float)i/bones.Length);
+                bone.transform.rotation = Quaternion.LookRotation(rope.End - rope.Start);
                 bones[i] = bone.transform;
                 //Debug.DrawLine(bone.transform.position, bone.transform.position + Vector3.up, Color.red, 10f);
             }
@@ -129,20 +140,49 @@ public partial struct RopeSystem : ISystem
             for (int i = 0; i < bones.Length; i++)
                 bindPoses[i] = bones[i].worldToLocalMatrix;
 
-            // create bone entities
+            // create physic geometry for bones
+            var colliderLength = rope.Length() / bones.Length;
+            var capsuleCollider = CylinderCollider.Create(new CylinderGeometry
+            {
+                Radius = 0.1f,
+                Height = colliderLength,
+                Center = new float3(0f, colliderLength/2f, 0f),
+                // orientation equals to the rope orientation
+                Orientation = quaternion.identity,
+                BevelRadius = 0.01f,
+                SideCount = 8
+            });
+
+            // create bone entities with physics
             var boneEntities = new NativeArray<Entity>(bones.Length, Allocator.TempJob);
             var boneArchetypeComponentList = new FixedList128Bytes<ComponentType> {
                 ComponentType.ReadOnly<LocalToWorld>(), 
                 ComponentType.ReadOnly<LocalTransform>(),
+                // working collider
+                ComponentType.ReadOnly<PhysicsCollider>(),
+                ComponentType.ReadOnly<PhysicsWorldIndex>(),
+                // because dynamic
+                ComponentType.ReadOnly<PhysicsVelocity>(),
+                ComponentType.ReadOnly<PhysicsMass>(),
+                ComponentType.ReadOnly<PhysicsDamping>(),
+                ComponentType.ReadOnly<PhysicsGravityFactor>(),
             }.ToNativeArray(state.WorldUpdateAllocator);
             var boneArchetype = state.EntityManager.CreateArchetype(boneArchetypeComponentList);
 
             for (int i = 0; i < bones.Length; i++){
                 boneEntities[i] = state.EntityManager.CreateEntity(boneArchetype);
-                state.EntityManager.SetComponentData(boneEntities[i], new LocalToWorld{Value = bones[i].localToWorldMatrix});
+                // Set the transform of the entity to the transform of the bone
                 state.EntityManager.SetName(boneEntities[i], bones[i].name);
                 state.EntityManager.SetComponentData(boneEntities[i], LocalTransform.FromMatrix(bones[i].localToWorldMatrix));
                 ecb.AddComponent(boneEntities[i], new CompanionLink{Companion = bones[i].gameObject});
+                
+                // set collider
+                state.EntityManager.SetComponentData(boneEntities[i], new PhysicsCollider{Value = capsuleCollider});
+
+                // set physics
+                state.EntityManager.SetComponentData(boneEntities[i], PhysicsMass.CreateDynamic(capsuleCollider.Value.MassProperties, 1f));
+                state.EntityManager.SetComponentData(boneEntities[i], new PhysicsDamping{Linear = 0.1f, Angular = 0.1f});
+                state.EntityManager.SetComponentData(boneEntities[i], new PhysicsGravityFactor{Value = 1f});
             }
 
             // generate mesh
