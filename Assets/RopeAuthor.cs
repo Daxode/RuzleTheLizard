@@ -7,7 +7,7 @@ using Unity.Rendering;
 using Unity.Transforms;
 using Unity.Physics;
 
-class RopeAuthor : MonoBehaviour
+internal class RopeAuthor : MonoBehaviour
 {
     public Vector3 Start = Vector3.zero;
     public Vector3 End = Vector3.up;
@@ -33,7 +33,7 @@ class RopeAuthor : MonoBehaviour
     }
 }
 
-struct RopeInfo : IComponentData
+internal struct RopeInfo : IComponentData
 {
     public float3 Start;
     public float3 End;
@@ -62,20 +62,20 @@ public partial struct RopeSystem : ISystem
             var rope = ropeRef.ValueRO;
             // generate vertices
             var job = new GenerateRopeVerticesJob(
-                rope.Start, rope.End
+                math.distance(rope.Start, rope.End), state.WorldUpdateAllocator
             );
             job.Run(job.RingCount);
 
             // generate indices
             var indices = new NativeArray<int>(job.IndexCount + job.IndexCountCaps, Allocator.TempJob);
-            for (int i = 0; i < job.RingCount-1; i++)
+            for (var i = 0; i < job.RingCount-1; i++)
             {
-                int ringStart = i * job.VerticesPerRing;
-                int nextRingStart = (i + 1) * job.VerticesPerRing;
-                for (int j = 0; j < job.VerticesPerRing; j++)
+                var ringStart = i * job.VerticesPerRing;
+                var nextRingStart = (i + 1) * job.VerticesPerRing;
+                for (var j = 0; j < job.VerticesPerRing; j++)
                 {
-                    int nextJ = (j + 1) % job.VerticesPerRing;
-                    int index = i * job.VerticesPerRing * 6 + j * 6;
+                    var nextJ = (j + 1) % job.VerticesPerRing;
+                    var index = i * job.VerticesPerRing * 6 + j * 6;
                     indices[index] = ringStart + j;
                     indices[index + 1] = ringStart + nextJ;
                     indices[index + 2] = nextRingStart + j;
@@ -85,19 +85,19 @@ public partial struct RopeSystem : ISystem
                 }
             }
             // start cap
-            for (int i = 0; i < job.VerticesPerRing-1; i++)
+            for (var i = 0; i < job.VerticesPerRing-1; i++)
             {
-                int nextI = (i + 1) % job.VerticesPerRing;
-                int index = job.IndexCount + i * 3;
+                var nextI = (i + 1) % job.VerticesPerRing;
+                var index = job.IndexCount + i * 3;
                 indices[index] = 0;
                 indices[index + 1] = nextI;
                 indices[index + 2] = i;
             }
             // end cap
-            for (int i = 0; i < job.VerticesPerRing-1; i++)
+            for (var i = 0; i < job.VerticesPerRing-1; i++)
             {
-                int nextI = (i + 1) % job.VerticesPerRing;
-                int index = job.IndexCount + job.IndexCountCaps/2 + i * 3;
+                var nextI = (i + 1) % job.VerticesPerRing;
+                var index = job.IndexCount + job.IndexCountCaps/2 + i * 3;
                 indices[index] = job.Vertices.Length - 1;
                 indices[index + 1] = job.Vertices.Length - 1 - nextI;
                 indices[index + 2] = job.Vertices.Length - 1 - i;
@@ -105,7 +105,7 @@ public partial struct RopeSystem : ISystem
 
             // create bone weights
             var boneWeights = new NativeArray<BoneWeight>(job.Vertices.Length, Allocator.TempJob);
-            for (int i = 0; i < job.Vertices.Length; i++)
+            for (var i = 0; i < job.Vertices.Length; i++)
             {
                 var ringIndex = i/job.VerticesPerRing;
                 var segmentIndex = (ringIndex-1)/2;
@@ -126,7 +126,7 @@ public partial struct RopeSystem : ISystem
 
             // create bones
             var bones = new Transform[job.SegmentCount-1];
-            for (int i = 0; i < bones.Length; i++)
+            for (var i = 0; i < bones.Length; i++)
             {
                 var bone = new GameObject("Rope bone " + i);
                 bone.transform.position = math.lerp(rope.Start, rope.End, (float)i/bones.Length);
@@ -137,8 +137,11 @@ public partial struct RopeSystem : ISystem
 
             // create bind poses
             var bindPoses = new NativeArray<Matrix4x4>(bones.Length, Allocator.TempJob);
-            for (int i = 0; i < bones.Length; i++)
-                bindPoses[i] = bones[i].worldToLocalMatrix;
+            for (var i = 0; i < bones.Length; i++) {
+                var point = new float3(0, 0, (math.distance(rope.Start, rope.End) / bones.Length) * i);
+                Debug.DrawLine(point, point + math.up()*0.1f, Color.magenta, 10f);
+                bindPoses[i] = LocalTransform.FromPosition(point).Inverse().ToMatrix();
+            }
 
             // create physic geometry for bones
             var colliderLength = rope.Length() / bones.Length;
@@ -146,7 +149,7 @@ public partial struct RopeSystem : ISystem
             {
                 Radius = 0.1f,
                 Height = colliderLength,
-                Center = new float3(0f, colliderLength/2f, 0f),
+                Center = new float3(0f, 0f, colliderLength/2f),
                 // orientation equals to the rope orientation
                 Orientation = quaternion.identity,
                 BevelRadius = 0.01f,
@@ -169,7 +172,7 @@ public partial struct RopeSystem : ISystem
             }.ToNativeArray(state.WorldUpdateAllocator);
             var boneArchetype = state.EntityManager.CreateArchetype(boneArchetypeComponentList);
 
-            for (int i = 0; i < bones.Length; i++){
+            for (var i = 0; i < bones.Length; i++){
                 boneEntities[i] = state.EntityManager.CreateEntity(boneArchetype);
                 // Set the transform of the entity to the transform of the bone
                 state.EntityManager.SetName(boneEntities[i], bones[i].name);
@@ -209,11 +212,10 @@ public partial struct RopeSystem : ISystem
             mr.bones = bones;
 
             // draw all verts
-            // for (int i = 0; i < job.Vertices.Length; i++)
-            // {
-            //     Debug.DrawLine(job.Vertices[i], job.Vertices[i] + math.up() * 0.14f, Color.red, 20f);
-            // }
-            //job.Vertices.Dispose();
+            foreach (var vert in job.Vertices) {
+                Debug.DrawLine(vert, vert + math.up() * 0.14f, Color.red, 20f);
+            }
+            
             indices.Dispose();
             job.Vertices.Dispose();
             boneWeights.Dispose();
@@ -224,17 +226,16 @@ public partial struct RopeSystem : ISystem
 }
 
 // Create cylinder verts job
-[Unity.Burst.BurstCompile]
-struct GenerateRopeVerticesJob : IJobFor {
-    public readonly int SegmentCount; // number of segments
+//[Unity.Burst.BurstCompile]
+internal struct GenerateRopeVerticesJob : IJobFor {
+    public readonly int SegmentCount => math.max((int)(segmentsPerMeter * length), 2);
+    readonly int segmentsPerMeter; // number of segments
     public readonly int RingCount => SegmentCount * 2;
-    readonly int verticesPerRing;
-    public readonly int VerticesPerRing => verticesPerRing;
-    
+    public int VerticesPerRing { get; }
+
     readonly float middleRadius;
     readonly float capRadius;
-    readonly float3 start;
-    readonly float3 end;
+    readonly float length; // in meters
 
     readonly float deltaOut;
 
@@ -248,16 +249,15 @@ struct GenerateRopeVerticesJob : IJobFor {
     public readonly int IndexCount => RingCount * VerticesPerRing * 6;
     public readonly int IndexCountCaps => (VerticesPerRing-1) * 2 * 3;
 
-    public GenerateRopeVerticesJob(float3 start, float3 end, int segmentCount = 4, int verticesPerRing = 5, float middleRadius = 0.1f, float capRadius = 0.05f, float deltaOut = 0.1f) {
-        this.start = start;
-        this.end = end;
-        this.SegmentCount = segmentCount;
-        this.verticesPerRing = verticesPerRing;
+    public GenerateRopeVerticesJob(float length, Allocator allocator = Allocator.TempJob, int segmentsPerMeter = 2, int verticesPerRing = 5, float middleRadius = 0.1f, float capRadius = 0.05f, float deltaOut = 0.1f) {
+        this.segmentsPerMeter = segmentsPerMeter;
+        VerticesPerRing = verticesPerRing;
         this.middleRadius = middleRadius;
         this.capRadius = capRadius;
         this.deltaOut = deltaOut;
-        var ringCount = SegmentCount * 2;
-        this.vertices = new NativeArray<float3>(ringCount * verticesPerRing, Allocator.TempJob);
+        var ringCount = math.max((int)(segmentsPerMeter * length), 2)*2;
+        vertices = CollectionHelper.CreateNativeArray<float3>(ringCount * verticesPerRing, allocator);
+        this.length = length;
     }
 
     // 0 is start ring, SegmentCount*2 is end ring
@@ -267,38 +267,34 @@ struct GenerateRopeVerticesJob : IJobFor {
             // create vertices
             var radius = capRadius;
             var startIndex = ringIndex * VerticesPerRing;
-            var direction = end-start;
             var isFirst = ringIndex % 2 == 0;
             var delta = isFirst ? -deltaOut : deltaOut;
-            var pushOut = math.normalize(direction) * delta;
-            var startPos = (ringIndex == 0 ? start : end) + pushOut;
+            var startPos = new float3(0, 0, (ringIndex == 0 ? 0 : length) + delta);
 
             // create ring
-            for (int i = 0; i < VerticesPerRing; i++) {
+            for (var i = 0; i < VerticesPerRing; i++) {
                 var angle = (float)i / VerticesPerRing * math.PI * 2;
                 var x = math.cos(angle) * radius;
                 var y = math.sin(angle) * radius;
                 var pos = new float3(x, y, 0);
-                vertices[startIndex + i] = math.mul(quaternion.LookRotationSafe(direction, math.up()), pos) + startPos;
+                vertices[startIndex + i] = pos + startPos;
             }
         } else {
             // create vertices
             var radius = middleRadius;
             var startIndex = ringIndex * VerticesPerRing;
-            var direction = end-start;
             var isFirst = ringIndex % 2 == 0;
-            var delta = isFirst ? -deltaOut : deltaOut;
-            var pushOut = math.normalize(direction) * delta;
-            var offset = math.lerp(start, end, (float)(ringIndex/2) / (SegmentCount-1));
-            var startPos = offset + pushOut;
+            var delta = isFirst ? -deltaOut : deltaOut;;
+            var offset = length*((float)(ringIndex/2) / (SegmentCount-1));
+            var startPos = new float3(0, 0, offset + delta);
 
             // create ring
-            for (int i = 0; i < VerticesPerRing; i++) {
+            for (var i = 0; i < VerticesPerRing; i++) {
                 var angle = (float)i / VerticesPerRing * math.PI * 2;
                 var x = math.cos(angle) * radius;
                 var y = math.sin(angle) * radius;
                 var pos = new float3(x, y, 0);
-                vertices[startIndex + i] = math.mul(quaternion.LookRotationSafe(direction, math.up()), pos) + startPos;
+                vertices[startIndex + i] = pos + startPos;
             }
         }
     }
