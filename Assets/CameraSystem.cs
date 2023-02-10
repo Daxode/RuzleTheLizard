@@ -10,14 +10,11 @@ public partial class CameraSystem : SystemBase
             return;
 
         var ecb = SystemAPI.GetSingleton<EndInitializationEntityCommandBufferSystem.Singleton>().CreateCommandBuffer(World.Unmanaged);
-        foreach (var player in SystemAPI.Query<ThirdPersonPlayer>().WithAll<Simulate>())
-        {            
-            if (!SystemAPI.ManagedAPI.HasComponent<CompanionLink>(player.ControlledCamera))
-            {
-                ecb.AddComponent(player.ControlledCamera, new CompanionLink{Companion=Camera.main.gameObject});
-                Cursor.lockState = CursorLockMode.Locked;
-                shouldRun = false;
-            }
+        foreach (var player in SystemAPI.Query<ThirdPersonPlayer>().WithAll<Simulate>()) {
+            if (SystemAPI.ManagedAPI.HasComponent<CompanionLink>(player.ControlledCamera)) continue;
+            ecb.AddComponent(player.ControlledCamera, new CompanionLink{Companion=Camera.main.gameObject});
+            Cursor.lockState = CursorLockMode.Locked;
+            shouldRun = false;
         }
     }
 }
