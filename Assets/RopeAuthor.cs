@@ -139,7 +139,7 @@ public partial struct RopeSystem : ISystem
             var bindPoses = new NativeArray<Matrix4x4>(bones.Length, Allocator.TempJob);
             for (var i = 0; i < bones.Length; i++) {
                 var point = new float3(0, 0, (math.distance(rope.Start, rope.End) / bones.Length) * i);
-                Debug.DrawLine(point, point + math.up()*0.1f, Color.magenta, 10f);
+                // Debug.DrawLine(point, point + math.up()*0.1f, Color.magenta, 10f);
                 bindPoses[i] = LocalTransform.FromPosition(point).Inverse().ToMatrix();
             }
 
@@ -171,9 +171,9 @@ public partial struct RopeSystem : ISystem
                 ComponentType.ReadOnly<PhysicsGravityFactor>(),
             }.ToNativeArray(state.WorldUpdateAllocator);
             var boneArchetype = state.EntityManager.CreateArchetype(boneArchetypeComponentList);
-
-            for (var i = 0; i < bones.Length; i++){
-                boneEntities[i] = state.EntityManager.CreateEntity(boneArchetype);
+            state.EntityManager.CreateEntity(boneArchetype, boneEntities);
+            
+            for (var i = 0; i < boneEntities.Length; i++){
                 // Set the transform of the entity to the transform of the bone
                 state.EntityManager.SetName(boneEntities[i], bones[i].name);
                 state.EntityManager.SetComponentData(boneEntities[i], LocalTransform.FromMatrix(bones[i].localToWorldMatrix));
@@ -183,11 +183,57 @@ public partial struct RopeSystem : ISystem
                 state.EntityManager.SetComponentData(boneEntities[i], new PhysicsCollider{Value = capsuleCollider});
 
                 // set physics
-                state.EntityManager.SetComponentData(boneEntities[i], PhysicsMass.CreateDynamic(capsuleCollider.Value.MassProperties, 1f));
+                state.EntityManager.SetComponentData(boneEntities[i], PhysicsMass.CreateDynamic(capsuleCollider.Value.MassProperties, 0.001f));
                 state.EntityManager.SetComponentData(boneEntities[i], new PhysicsDamping{Linear = 0.1f, Angular = 0.1f});
                 state.EntityManager.SetComponentData(boneEntities[i], new PhysicsGravityFactor{Value = 1f});
             }
+            
+            // create rope joints
+            var ropeJointEntities = new NativeArray<Entity>((bones.Length-1)*2, Allocator.TempJob);
+            var ropeJointArchetypeComponentList = new FixedList128Bytes<ComponentType> {
+                ComponentType.ReadOnly<PhysicsConstrainedBodyPair>(),
+                ComponentType.ReadOnly<PhysicsWorldIndex>(),
+                ComponentType.ReadOnly<PhysicsJoint>(),
+                ComponentType.ReadOnly<PhysicsJointCompanion>(),
+            }.ToNativeArray(state.WorldUpdateAllocator);
+            var ropeJointArchetype = state.EntityManager.CreateArchetype(ropeJointArchetypeComponentList);
+            state.EntityManager.CreateEntity(ropeJointArchetype, ropeJointEntities);
+            for (var i = 0; i < bones.Length-1; i++){
+                // make sure rope doesn't twist
+                var bodyA = new BodyFrame {
+                    Position = new float3(0, 0, colliderLength),
+                    Axis = new float3(1,0,0),
+                    PerpendicularAxis = new float3(0,1,0),
+                };
+                PhysicsJoint.CreateRagdoll(bodyA, BodyFrame.Identity,
+                    math.PI / 2f,
+                    new Math.FloatRange(-math.PI / 16f, math.PI / 16f),
+                    new Math.FloatRange(-math.PI / 16f, math.PI / 16f), 
+                    out var primaryConeAndTwist, out var perpendicularCone);
+                
+                // create two joints for each bone
+                state.EntityManager.SetName(ropeJointEntities[i*2], "Rope joint " + i + " A");
+                state.EntityManager.SetComponentData(ropeJointEntities[i*2], new PhysicsConstrainedBodyPair(boneEntities[i], boneEntities[i+1], false));
+                state.EntityManager.GetBuffer<PhysicsJointCompanion>(ropeJointEntities[i*2]).Add(new PhysicsJointCompanion{JointEntity = ropeJointEntities[i*2+1]});
+                state.EntityManager.SetComponentData(ropeJointEntities[i*2], primaryConeAndTwist);
+                
+                state.EntityManager.SetName(ropeJointEntities[i*2+1], "Rope joint " + i + " B");
+                state.EntityManager.SetComponentData(ropeJointEntities[i*2+1], new PhysicsConstrainedBodyPair(boneEntities[i], boneEntities[i+1], false));
+                state.EntityManager.SetComponentData(ropeJointEntities[i*2+1], perpendicularCone);
+            }
 
+            // constrain to point on start
+            var startJointEntity = state.EntityManager.CreateEntity(ropeJointArchetype);
+            state.EntityManager.SetName(startJointEntity, "Rope start joint");
+            state.EntityManager.SetComponentData(startJointEntity, new PhysicsConstrainedBodyPair(boneEntities[0], Entity.Null, true));
+            state.EntityManager.SetComponentData(startJointEntity, PhysicsJoint.CreateBallAndSocket(0, rope.Start));
+
+            // constrain to point on end
+            var endJointEntity = state.EntityManager.CreateEntity(ropeJointArchetype);
+            state.EntityManager.SetName(endJointEntity, "Rope end joint");
+            state.EntityManager.SetComponentData(endJointEntity, new PhysicsConstrainedBodyPair(boneEntities[^1], Entity.Null, true));
+            state.EntityManager.SetComponentData(endJointEntity, PhysicsJoint.CreateBallAndSocket(new float3(0, 0, colliderLength), rope.End+math.down()*2));
+            
             // generate mesh
             var mesh = new Mesh();
             mesh.MarkDynamic();
@@ -201,8 +247,6 @@ public partial struct RopeSystem : ISystem
 
             // Draw the mesh
             var go = new GameObject("Rope");
-            // var mf = go.AddComponent<MeshFilter>();
-            // mf.mesh = mesh;
             var mr = go.AddComponent<SkinnedMeshRenderer>();
             // get urp material
             var urp = UnityEngine.Rendering.Universal.UniversalRenderPipeline.asset;
@@ -212,9 +256,9 @@ public partial struct RopeSystem : ISystem
             mr.bones = bones;
 
             // draw all verts
-            foreach (var vert in job.Vertices) {
-                Debug.DrawLine(vert, vert + math.up() * 0.14f, Color.red, 20f);
-            }
+            // foreach (var vert in job.Vertices) {
+            //     Debug.DrawLine(vert, vert + math.up() * 0.14f, Color.red, 20f);
+            // }
             
             indices.Dispose();
             job.Vertices.Dispose();
@@ -239,8 +283,8 @@ internal struct GenerateRopeVerticesJob : IJobFor {
 
     readonly float deltaOut;
 
-    [NativeDisableParallelForRestriction] [WriteOnly] 
-    public NativeArray<float3> vertices; // we know the size is RingCount * CircleVertexCount
+    [NativeDisableParallelForRestriction] [WriteOnly]
+    NativeArray<float3> vertices; // we know the size is RingCount * CircleVertexCount
 
 
     public readonly NativeArray<float3> Vertices => vertices;
