@@ -6,6 +6,8 @@ using Unity.Jobs;
 using Unity.Rendering;
 using Unity.Transforms;
 using Unity.Physics;
+using CapsuleCollider = UnityEngine.CapsuleCollider;
+using Material = Unity.Physics.Material;
 
 internal class RopeAuthor : MonoBehaviour
 {
@@ -145,15 +147,18 @@ public partial struct RopeSystem : ISystem
 
             // create physic geometry for bones
             var colliderLength = rope.Length() / bones.Length;
-            var capsuleCollider = CylinderCollider.Create(new CylinderGeometry
-            {
+
+            // physic geometry for bones as CapsuleCollider
+            var capsuleCollider = Unity.Physics.CapsuleCollider.Create(new CapsuleGeometry {
                 Radius = 0.1f,
-                Height = colliderLength,
-                Center = new float3(0f, 0f, colliderLength/2f),
-                // orientation equals to the rope orientation
-                Orientation = quaternion.identity,
-                BevelRadius = 0.01f,
-                SideCount = 8
+                Vertex0 = 0,
+                Vertex1 = new float3(0f, 0f, colliderLength-0.1f),
+            }, CollisionFilter.Default, new Material {
+                CollisionResponse = CollisionResponsePolicy.Collide,
+                FrictionCombinePolicy = Material.CombinePolicy.Minimum,
+                Friction = 0f,
+                RestitutionCombinePolicy = Material.CombinePolicy.Minimum,
+                Restitution = 0.0f
             });
 
             // create bone entities with physics
@@ -272,8 +277,8 @@ public partial struct RopeSystem : ISystem
 // Create cylinder verts job
 //[Unity.Burst.BurstCompile]
 internal struct GenerateRopeVerticesJob : IJobFor {
-    public readonly int SegmentCount => math.max((int)(segmentsPerMeter * length), 2);
-    readonly int segmentsPerMeter; // number of segments
+    public readonly int SegmentCount => math.max((int)(length/metersPerSegment), 2);
+    readonly float metersPerSegment; // number of segments
     public readonly int RingCount => SegmentCount * 2;
     public int VerticesPerRing { get; }
 
@@ -293,13 +298,13 @@ internal struct GenerateRopeVerticesJob : IJobFor {
     public readonly int IndexCount => RingCount * VerticesPerRing * 6;
     public readonly int IndexCountCaps => (VerticesPerRing-1) * 2 * 3;
 
-    public GenerateRopeVerticesJob(float length, Allocator allocator = Allocator.TempJob, int segmentsPerMeter = 2, int verticesPerRing = 5, float middleRadius = 0.1f, float capRadius = 0.05f, float deltaOut = 0.1f) {
-        this.segmentsPerMeter = segmentsPerMeter;
+    public GenerateRopeVerticesJob(float length, Allocator allocator = Allocator.TempJob, float metersPerSegment = 0.8f, int verticesPerRing = 9, float middleRadius = 0.1f, float capRadius = 0.05f, float deltaOut = 0.1f) {
+        this.metersPerSegment = metersPerSegment;
         VerticesPerRing = verticesPerRing;
         this.middleRadius = middleRadius;
         this.capRadius = capRadius;
         this.deltaOut = deltaOut;
-        var ringCount = math.max((int)(segmentsPerMeter * length), 2)*2;
+        var ringCount = math.max((int)(length/metersPerSegment), 2)*2; // 2 rings per segment
         vertices = CollectionHelper.CreateNativeArray<float3>(ringCount * verticesPerRing, allocator);
         this.length = length;
     }
