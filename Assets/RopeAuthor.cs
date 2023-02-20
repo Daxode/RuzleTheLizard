@@ -2,6 +2,8 @@ using Unity.Entities;
 using UnityEngine;
 using Unity.Mathematics;
 using Unity.Collections;
+using Unity.Deformations;
+using Unity.Entities.Graphics;
 using Unity.Jobs;
 using Unity.Rendering;
 using Unity.Transforms;
@@ -13,6 +15,7 @@ internal class RopeAuthor : MonoBehaviour
 {
     public Vector3 Start = Vector3.zero;
     public Vector3 End = Vector3.up;
+    public UnityEngine.Material Material;
 
     class Baker : Baker<RopeAuthor>
     {
@@ -23,6 +26,7 @@ internal class RopeAuthor : MonoBehaviour
                 Start = auth.Start,
                 End = auth.End
             });
+            AddComponentObject(new RopeMaterial{material = DependsOn(auth.Material)});
         }
     }
 
@@ -42,9 +46,15 @@ internal struct RopeInfo : IComponentData
     public float Length() => math.distance(Start, End);
 }
 
+class RopeMaterial : IComponentData {
+    public UnityEngine.Material material;
+}
+
 public partial struct RopeSystem : ISystem
 {
-    public void OnCreate(ref SystemState state){}
+    public void OnCreate(ref SystemState state) {
+        state.RequireForUpdate<RopeAttachPoint>();
+    }
     public void OnDestroy(ref SystemState state){}
     public void OnUpdate(ref SystemState state) {
         if (Input.GetKeyDown(KeyCode.R)) {
@@ -58,8 +68,9 @@ public partial struct RopeSystem : ISystem
         }
 
         var ecb = SystemAPI.GetSingleton<EndSimulationEntityCommandBufferSystem.Singleton>().CreateCommandBuffer(state.WorldUnmanaged);
+        var ropeAttachPoint = SystemAPI.GetSingletonEntity<RopeAttachPoint>();
 
-        foreach (var ropeRef in SystemAPI.Query<RefRO<RopeInfo>>().WithChangeFilter<RopeInfo>())
+        foreach (var (ropeRef, materialRef) in SystemAPI.Query<RefRO<RopeInfo>, RopeMaterial>().WithChangeFilter<RopeInfo>())
         {
             var rope = ropeRef.ValueRO;
             // generate vertices
@@ -213,7 +224,7 @@ public partial struct RopeSystem : ISystem
                 PhysicsJoint.CreateRagdoll(bodyA, BodyFrame.Identity,
                     math.PI / 2f,
                     new Math.FloatRange(-math.PI / 16f, math.PI / 16f),
-                    new Math.FloatRange(-math.PI / 16f, math.PI / 16f), 
+                    new Math.FloatRange(-math.PI / 2f, math.PI / 2f), 
                     out var primaryConeAndTwist, out var perpendicularCone);
                 
                 // create two joints for each bone
@@ -230,13 +241,13 @@ public partial struct RopeSystem : ISystem
             // constrain to point on start
             var startJointEntity = state.EntityManager.CreateEntity(ropeJointArchetype);
             state.EntityManager.SetName(startJointEntity, "Rope start joint");
-            state.EntityManager.SetComponentData(startJointEntity, new PhysicsConstrainedBodyPair(boneEntities[0], Entity.Null, true));
-            state.EntityManager.SetComponentData(startJointEntity, PhysicsJoint.CreateBallAndSocket(0, rope.Start));
+            state.EntityManager.SetComponentData(startJointEntity, new PhysicsConstrainedBodyPair(boneEntities[0], ropeAttachPoint, false));
+            state.EntityManager.SetComponentData(startJointEntity, PhysicsJoint.CreateBallAndSocket(0,  math.up()));
 
             // constrain to point on end
             var endJointEntity = state.EntityManager.CreateEntity(ropeJointArchetype);
             state.EntityManager.SetName(endJointEntity, "Rope end joint");
-            state.EntityManager.SetComponentData(endJointEntity, new PhysicsConstrainedBodyPair(boneEntities[^1], Entity.Null, true));
+            state.EntityManager.SetComponentData(endJointEntity, new PhysicsConstrainedBodyPair(boneEntities[^1], Entity.Null, false));
             state.EntityManager.SetComponentData(endJointEntity, PhysicsJoint.CreateBallAndSocket(new float3(0, 0, colliderLength), rope.End+math.down()*2));
             
             // generate mesh
@@ -246,18 +257,17 @@ public partial struct RopeSystem : ISystem
             mesh.SetVertices(job.Vertices);
             mesh.SetIndices(indices, MeshTopology.Triangles, 0);
             mesh.RecalculateNormals();
-            mesh.bounds = new Bounds(Vector3.zero, Vector3.one * 1000f);
+            mesh.RecalculateBounds();
             mesh.boneWeights = boneWeights.ToArray();
             mesh.bindposes = bindPoses.ToArray();
+            mesh.SetUVs(0, job.UVs);
 
             // Draw the mesh
             var go = new GameObject("Rope");
             var mr = go.AddComponent<SkinnedMeshRenderer>();
             // get urp material
-            var urp = UnityEngine.Rendering.Universal.UniversalRenderPipeline.asset;
-            mr.material = urp.defaultMaterial;
+            mr.material = materialRef.material;
             mr.sharedMesh = mesh;
-            mr.material.color = new Color(0.5f, 0.3f, 0.1f);
             mr.bones = bones;
 
             // draw all verts
@@ -275,7 +285,7 @@ public partial struct RopeSystem : ISystem
 }
 
 // Create cylinder verts job
-//[Unity.Burst.BurstCompile]
+[Unity.Burst.BurstCompile]
 internal struct GenerateRopeVerticesJob : IJobFor {
     public readonly int SegmentCount => math.max((int)(length/metersPerSegment), 2);
     readonly float metersPerSegment; // number of segments
@@ -297,6 +307,11 @@ internal struct GenerateRopeVerticesJob : IJobFor {
 
     public readonly int IndexCount => RingCount * VerticesPerRing * 6;
     public readonly int IndexCountCaps => (VerticesPerRing-1) * 2 * 3;
+    
+    // uvs
+    [NativeDisableParallelForRestriction] [WriteOnly]
+    NativeArray<float2> uvs; // we know the size is RingCount * CircleVertexCount
+    public readonly NativeArray<float2> UVs => uvs;
 
     public GenerateRopeVerticesJob(float length, Allocator allocator = Allocator.TempJob, float metersPerSegment = 0.8f, int verticesPerRing = 9, float middleRadius = 0.1f, float capRadius = 0.05f, float deltaOut = 0.1f) {
         this.metersPerSegment = metersPerSegment;
@@ -306,6 +321,7 @@ internal struct GenerateRopeVerticesJob : IJobFor {
         this.deltaOut = deltaOut;
         var ringCount = math.max((int)(length/metersPerSegment), 2)*2; // 2 rings per segment
         vertices = CollectionHelper.CreateNativeArray<float3>(ringCount * verticesPerRing, allocator);
+        uvs = CollectionHelper.CreateNativeArray<float2>(ringCount * verticesPerRing, allocator);
         this.length = length;
     }
 
@@ -327,6 +343,7 @@ internal struct GenerateRopeVerticesJob : IJobFor {
                 var y = math.sin(angle) * radius;
                 var pos = new float3(x, y, 0);
                 vertices[startIndex + i] = pos + startPos;
+                uvs[startIndex + i] = new float2((float)i / VerticesPerRing, (ringIndex == 0 ? 0 : length) + delta);
             }
         } else {
             // create vertices
@@ -344,6 +361,7 @@ internal struct GenerateRopeVerticesJob : IJobFor {
                 var y = math.sin(angle) * radius;
                 var pos = new float3(x, y, 0);
                 vertices[startIndex + i] = pos + startPos;
+                uvs[startIndex + i] = new float2((float)i / VerticesPerRing, offset + delta);
             }
         }
     }
