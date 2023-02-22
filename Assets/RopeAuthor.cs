@@ -1,3 +1,4 @@
+using Unity.Burst;
 using Unity.Entities;
 using UnityEngine;
 using Unity.Mathematics;
@@ -55,6 +56,8 @@ public partial struct RopeSystem : ISystem
     public void OnCreate(ref SystemState state) {
         state.RequireForUpdate<RopeAttachPoint>();
     }
+    
+    [BurstCompile]
     public void OnDestroy(ref SystemState state){}
     public void OnUpdate(ref SystemState state) {
         if (Input.GetKeyDown(KeyCode.R)) {
@@ -122,7 +125,6 @@ public partial struct RopeSystem : ISystem
             {
                 var ringIndex = i/job.VerticesPerRing;
                 var segmentIndex = (ringIndex-1)/2;
-                var boneIndex0 = segmentIndex;
 
                 boneWeights[i] = new BoneWeight
                 {
@@ -130,7 +132,7 @@ public partial struct RopeSystem : ISystem
                     weight1 = 0f,
                     weight2 = 0f,
                     weight3 = 0f,
-                    boneIndex0 = math.clamp(boneIndex0, 0, job.SegmentCount-2),
+                    boneIndex0 = math.clamp(segmentIndex, 0, job.SegmentCount-2),
                     boneIndex1 = 0,
                     boneIndex2 = 0,
                     boneIndex3 = 0
@@ -222,9 +224,9 @@ public partial struct RopeSystem : ISystem
                     PerpendicularAxis = new float3(0,1,0),
                 };
                 PhysicsJoint.CreateRagdoll(bodyA, BodyFrame.Identity,
-                    math.PI / 2f,
-                    new Math.FloatRange(-math.PI / 16f, math.PI / 16f),
-                    new Math.FloatRange(-math.PI / 2f, math.PI / 2f), 
+                    math.PI / 1f,
+                    new Math.FloatRange(-math.PI /2f, math.PI /2f),
+                    new Math.FloatRange(-math.PI /16f, math.PI / 16f), 
                     out var primaryConeAndTwist, out var perpendicularCone);
                 
                 // create two joints for each bone
