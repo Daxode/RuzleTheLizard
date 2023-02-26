@@ -70,78 +70,55 @@ partial struct RailMeshBakingSystem : ISystem {
             var curveCount = spline.GetCurveCount();
             for (var curveIndex = 0; curveIndex < curveCount; curveIndex++) {
                 var curve = spline.GetCurve(curveIndex);
+                var curveP0 = curve.P0;
+                var curveP3 = curve.P3;
 
-                // should create start curve
-                if (curveIndex == 0 && spline.Closed || curveIndex > 0) {
-                    // *---------------*
-                    // |  S----x       |
-                    // |       *       |
-                    // |       |       |
-                    // |       x*---E  |
-                    // *---------------*
+                void AddHalfCurve(bool isStart) {
                     // create square
-                    var p0 = transform.TransformPoint(curve.P0);
-                    var p3 = transform.TransformPoint(curve.P3);
-                    
-                    // var forward = curve.P3 - curve.P0;
-                    // forward = math.normalize(forward);
-                    var knot = spline[curveIndex];
+                    var startPoint = isStart ? spline[curveIndex - 1].Position : curveP0;
+                    var middlePoint = isStart ? curveP0 : curveP3;
+                    var endPoint = isStart ? curveP3 : spline[curveIndex + 2].Position;
+                    startPoint = transform.TransformPoint(startPoint);
+                    middlePoint = transform.TransformPoint(middlePoint);
+                    endPoint = transform.TransformPoint(endPoint);
+
+                    var knot = spline[curveIndex + (isStart ? 0 : 1)];
                     var up = math.mul(knot.Rotation, math.up());
-                    // var right = math.cross(forward, up);
-                    // right = math.normalize(right);
-
-                    var previousKnot = spline[curveIndex-1];
-                    var p0ToPreviousKnot = transform.TransformPoint(previousKnot.Position) - p0;
                     
-                    var p0ToPreviousKnotDirection = math.normalize(p0ToPreviousKnot);
-                    var circleDirectionToPreviousKnot = p0ToPreviousKnotDirection*cornerRadius;
-                    var toPreviousKnotPoint = p0 + circleDirectionToPreviousKnot;
-                    var planeBetweenPreviousKnotAndP0 = new Plane(p0ToPreviousKnotDirection, toPreviousKnotPoint);
+                    var middlePointToStart = startPoint - middlePoint;
+                    var toStartDirection = math.normalize(middlePointToStart);
+                    var toStartDirectionWithMagnitude = toStartDirection * cornerRadius;
+                    var toStartPoint = middlePoint + toStartDirectionWithMagnitude;
+                    var toStartPointRight = math.cross(toStartDirection, up);
+                    var toStartPlane = new Plane(toStartDirection, toStartPoint);
 
-                    var p0ToP3 = p3 - p0;
-                    var p0ToP3Direction = math.normalize(p0ToP3);
-                    var circleDirectionToP3 = p0ToP3Direction*cornerRadius;
-                    var toP3Point = p0 + circleDirectionToP3;
-                    var planeBetweenP3AndP0 = new Plane(p0ToP3Direction, toP3Point);
+                    var middlePointToEnd = endPoint - middlePoint;
+                    var toEndDirection = math.normalize(middlePointToEnd);
+                    var toEndDirectionWithMagnitude = toEndDirection * cornerRadius;
+                    var toEndPoint = middlePoint + toEndDirectionWithMagnitude;
+                    var toEndPointRight = math.cross(toEndDirection, up);
+                    var toEndPlane = new Plane(toEndDirection, toEndPoint);
 
-                    // draw planes (planeBetweenPreviousKnotAndP0 and planeBetweenP0AndP3)
-                    DebugDrawPlane(p0+circleDirectionToPreviousKnot, planeBetweenPreviousKnotAndP0, up, 1, Color.green);
-                    DebugDrawPlane(p0+circleDirectionToP3, planeBetweenP3AndP0, up, 1, Color.red);
-                    
-                    // draw plane up
-                    Debug.DrawLine(p0+circleDirectionToPreviousKnot, p0+circleDirectionToPreviousKnot + up, Color.green, 2f);
-                    Debug.DrawLine(p0+circleDirectionToP3, p0+circleDirectionToP3 + up, Color.red, 2f);
-                    
-                    // draw plane right
-                    var rightP0ToPreviousKnot = math.cross(p0ToPreviousKnotDirection, up);
-                    Debug.DrawLine(p0+circleDirectionToPreviousKnot, p0+circleDirectionToPreviousKnot + rightP0ToPreviousKnot, Color.green, 2f);
-                    var rightP0ToP3 = math.cross(p0ToP3Direction, up);
-                    Debug.DrawLine(p0+circleDirectionToP3, p0+circleDirectionToP3 + rightP0ToP3, Color.red, 2f);
-
-                    // draw normals
-                    Debug.DrawLine(p0, p0 + (float3)planeBetweenPreviousKnotAndP0.normal*1f, Color.green, 2f);
-                    Debug.DrawLine(p0, p0 + (float3)planeBetweenP3AndP0.normal*1f, Color.red, 2f);
-                    
                     // get intersection between planes
-                    var ray = new Ray(p0+circleDirectionToPreviousKnot, rightP0ToPreviousKnot);
-                    planeBetweenP3AndP0.Raycast(ray, out var distanceAlongRay);
+                    var ray = new Ray(toStartPoint, toStartPointRight);
+                    toEndPlane.Raycast(ray, out var distanceAlongRay);
                     var pivot = (float3)ray.GetPoint(distanceAlongRay);
-                    Debug.DrawLine(p0+circleDirectionToPreviousKnot, pivot, Color.blue, 2f);
 
                     // add square vertices
-                    var face0 = toPreviousKnotPoint + rightP0ToPreviousKnot * width + up * height;
-                    var face1 = toPreviousKnotPoint + rightP0ToPreviousKnot * width - up * height;
-                    var face2 = toPreviousKnotPoint - rightP0ToPreviousKnot * width - up * height;
-                    var face3 = toPreviousKnotPoint - rightP0ToPreviousKnot * width + up * height;
+                    var face0 = toStartPoint + toStartPointRight * width + up * height;
+                    var face1 = toStartPoint + toStartPointRight * width - up * height;
+                    var face2 = toStartPoint - toStartPointRight * width - up * height;
+                    var face3 = toStartPoint - toStartPointRight * width + up * height;
 
                     // overall rotation
-                    var fullRotation = Vector3.SignedAngle(toPreviousKnotPoint-pivot, toP3Point-pivot, up);
+                    var fullRotation = Vector3.SignedAngle(toStartPoint - pivot, toEndPoint - pivot, up);
                     fullRotation = math.radians(fullRotation);
-                    var halfRotation = fullRotation/2f;
-                    var rotationStep = halfRotation/cornerSegments;
+                    var halfRotation = fullRotation / 2f;
+                    var rotationStep = halfRotation / cornerSegments;
+                    var offsetRotation = isStart ? halfRotation : 0;
                     // rotate around pivot to get face 4, 5, 6, 7
                     for (var i = 0; i <= cornerSegments; i++) {
-                        var rotation = quaternion.AxisAngle(up, i*rotationStep+halfRotation);
+                        var rotation = quaternion.AxisAngle(up, i * rotationStep + offsetRotation);
 
                         vertices.Add(math.mul(rotation, face0 - pivot) + pivot);
                         vertices.Add(math.mul(rotation, face1 - pivot) + pivot);
@@ -153,69 +130,76 @@ partial struct RailMeshBakingSystem : ISystem {
                         uvs.Add(new float2(1, 1));
                         uvs.Add(new float2(1, 0));
                     }
-                } else {
+
+                    Debug.DrawLine(toStartPoint, toStartPoint + toStartPointRight, Color.green, 2f);
+                    Debug.DrawLine(toEndPoint, toEndPoint + toEndPointRight, Color.red, 2f);
+                    Debug.DrawLine(middlePoint, middlePoint + (float3)toStartPlane.normal*1f, Color.green, 2f);
+                    Debug.DrawLine(middlePoint, middlePoint + (float3)toEndPlane.normal*1f, Color.red, 2f);
+                    Debug.DrawLine(middlePoint+toStartDirectionWithMagnitude, pivot, Color.blue, 2f);
+                    
+                    // draw planes (planeBetweenStartAndP0 and planeBetweenP0AndP3)
+                    DebugDrawPlane(middlePoint+toStartDirectionWithMagnitude, toStartPlane, up, 1, Color.green);
+                    DebugDrawPlane(middlePoint+toEndDirectionWithMagnitude, toEndPlane, up, 1, Color.red);
+                    Debug.DrawLine(toStartPoint, toStartPoint + up, Color.green, 2f);
+                    Debug.DrawLine(toEndPoint, toEndPoint + up, Color.red, 2f);
+                }
+                
+                void AddStub(bool isStart) {
+                    var forward = curveP3 - curveP0;
+                    forward = math.normalize(forward);
+                    var knot = spline[curveIndex + (isStart ? 0 : 1)];
+                    var up = math.mul(knot.Rotation, math.up());
+                    var right = math.cross(forward, up);
+                    right = math.normalize(right);
+                    var rightOffset = right * width;
+                    var upOffset = up * height;
+
+                    var point = transform.TransformPoint(isStart ? curveP0 : curveP3);
+                    vertices.Add(point + rightOffset + upOffset);
+                    vertices.Add(point + rightOffset - upOffset);
+                    vertices.Add(point - rightOffset - upOffset);
+                    vertices.Add(point - rightOffset + upOffset);
+
+                    normals.AddReplicate(up, 4);
+                }
+
+                // should create start curve
+                if (!spline.Closed && curveIndex == 0) {
                     // *---------------*
                     // |  S*---x       |
                     // |       |       |
                     // |       |       |
                     // |       x----E  |
                     // *---------------*
-                    // create square
-                    Debug.Log("Creating start square");
-                    var forward = curve.P3 - curve.P0;
-                    forward = math.normalize(forward);
-                    var knot = spline[curveIndex];
-                    var up = math.mul(knot.Rotation, math.up());
-                    var right = math.cross(forward, up);
-                    right = math.normalize(right);
-                    var rightOffset = right * width;
-                    var upOffset = up * height;
-                    var p0 = transform.TransformPoint(curve.P0);
-                    
-                    vertices.Add(p0 + rightOffset + upOffset);
-                    vertices.Add(p0 + rightOffset - upOffset);
-                    vertices.Add(p0 - rightOffset - upOffset);
-                    vertices.Add(p0 - rightOffset + upOffset);
-                    
-                    normals.AddReplicate(up, 4);
-                }
-                
-                // should create end curve
-                if (curveIndex == curveCount - 1 && spline.Closed || curveIndex < curveCount - 1) {
-                    // *---------------*
-                    // |  S---*x       |
-                    // |       |       |
-                    // |       *       |
-                    // |       x----E  |
-                    // *---------------*
-                    // create square
+                    AddStub(true);
                 } else {
+                    // *---------------*
+                    // |  S----x       |
+                    // |       *       |
+                    // |       |       |
+                    // |       x*---E  |
+                    // *---------------*
+                    AddHalfCurve(true);
+                }
+
+                // should create end curve
+                if (!spline.Closed && curveIndex == curveCount - 1) {
                     // *---------------*
                     // |  S----x       |
                     // |       |       |
                     // |       |       |
                     // |       x---*E  |
                     // *---------------*
-                    // create square
-                    Debug.Log("Creating end square");
-                    var forward = curve.P3 - curve.P0;
-                    forward = math.normalize(forward);
-                    var knot = spline[curveIndex+1];
-                    var up = math.mul(knot.Rotation, math.up());
-                    var right = math.cross(forward, up);
-                    right = math.normalize(right);
-                    var rightOffset = right * width;
-                    var upOffset = up * height;
-                    var p3 = transform.TransformPoint(curve.P3);
-                    
-                    vertices.Add(p3 + rightOffset + upOffset);
-                    vertices.Add(p3 + rightOffset - upOffset);
-                    vertices.Add(p3 - rightOffset - upOffset);
-                    vertices.Add(p3 - rightOffset + upOffset);
-                    
-                    normals.AddReplicate(up, 4);
+                    AddStub(false);
+                } else {
+                    // *---------------*
+                    // |  S---*x       |
+                    // |       |       |
+                    // |       *       |
+                    // |       x----E  |
+                    // *---------------*
+                    AddHalfCurve(false);
                 }
-
 
 
                 // for (var t = 0f; t <= 1f; t += 0.01f) {
@@ -251,7 +235,7 @@ partial struct RailMeshBakingSystem : ISystem {
 
             // draw debug
             for (var i = 0; i < vertices.Length; i++) { 
-                Debug.DrawLine(vertices[i], vertices[i] + normals[i] * 0.1f, Color.green, 2);
+                Debug.DrawLine(vertices[i], vertices[i] + normals[i] * 0.05f, Color.green, 2);
             }
         }
     }
