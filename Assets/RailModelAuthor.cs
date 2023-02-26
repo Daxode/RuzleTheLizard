@@ -105,11 +105,24 @@ partial struct RailMeshBakingSystem : ISystem {
                     toEndPlane.Raycast(ray, out var distanceAlongRay);
                     var pivot = (float3)ray.GetPoint(distanceAlongRay);
 
-                    // add square vertices
-                    var face0 = toStartPoint + toStartPointRight * width + up * height;
-                    var face1 = toStartPoint + toStartPointRight * width - up * height;
-                    var face2 = toStartPoint - toStartPointRight * width - up * height;
-                    var face3 = toStartPoint - toStartPointRight * width + up * height;
+                    // face verts
+                    var faceP0 = toStartPoint + toStartPointRight * width + up * height;
+                    var faceP1 = toStartPoint + toStartPointRight * width - up * height;
+                    var faceP2 = toStartPoint - toStartPointRight * width - up * height;
+                    var faceP3 = toStartPoint - toStartPointRight * width + up * height;
+                    
+                    // face normals
+                    var faceN00 = up;
+                    var faceN01 = toStartPointRight;
+                    
+                    var faceN10 = toStartPointRight;
+                    var faceN11 = -up;
+                    
+                    var faceN20 = -up;
+                    var faceN21 = -toStartPointRight;
+                    
+                    var faceN30 = -toStartPointRight;
+                    var faceN31 = up;
 
                     // overall rotation
                     var fullRotation = Vector3.SignedAngle(toStartPoint - pivot, toEndPoint - pivot, up);
@@ -121,24 +134,59 @@ partial struct RailMeshBakingSystem : ISystem {
                     for (var i = 0; i <= cornerSegments; i++) {
                         var rotation = quaternion.AxisAngle(up, i * rotationStep + offsetRotation);
 
-                        vertices.Add(math.mul(rotation, face0 - pivot) + pivot);
-                        vertices.Add(math.mul(rotation, face1 - pivot) + pivot);
-                        vertices.Add(math.mul(rotation, face2 - pivot) + pivot);
-                        vertices.Add(math.mul(rotation, face3 - pivot) + pivot);
-                        normals.AddReplicate(up, 4);
-                        uvs.Add(new float2(0, 0));
-                        uvs.Add(new float2(0, 1));
-                        uvs.Add(new float2(1, 1));
-                        uvs.Add(new float2(1, 0));
+                        vertices.AddReplicate(math.mul(rotation, faceP0 - pivot) + pivot, 2);
+                        vertices.AddReplicate(math.mul(rotation, faceP1 - pivot) + pivot, 2);
+                        vertices.AddReplicate(math.mul(rotation, faceP2 - pivot) + pivot, 2);
+                        vertices.AddReplicate(math.mul(rotation, faceP3 - pivot) + pivot, 2);
                         
-                        // add indices
-                        var indexOffset = vertices.Length;
-                        indices.Add(indexOffset - 4);
-                        indices.Add(indexOffset - 3);
-                        indices.Add(indexOffset - 2);
-                        indices.Add(indexOffset - 4);
-                        indices.Add(indexOffset - 2);
-                        indices.Add(indexOffset - 1);
+                        // add normals
+                        normals.Add(math.mul(rotation, faceN00));
+                        normals.Add(math.mul(rotation, faceN01));
+                        
+                        normals.Add(math.mul(rotation, faceN10));
+                        normals.Add(math.mul(rotation, faceN11));
+                        
+                        normals.Add(math.mul(rotation, faceN20));
+                        normals.Add(math.mul(rotation, faceN21));
+                        
+                        normals.Add(math.mul(rotation, faceN30));
+                        normals.Add(math.mul(rotation, faceN31));
+
+                        uvs.AddReplicate(new float2(0, 0), 2);
+                        uvs.AddReplicate(new float2(0, 1), 2);
+                        uvs.AddReplicate(new float2(1, 1), 2);
+                        uvs.AddReplicate(new float2(1, 0), 2);
+                        
+                        // add indices connecting to previous vertices flat shaded
+                        var indexOffset = vertices.Length-16;
+                        if (indexOffset < 0) continue;
+                        indices.Add(indexOffset + 2);
+                        indices.Add(indexOffset + 1);
+                        indices.Add(indexOffset + 8 + 1);
+                        indices.Add(indexOffset + 2);
+                        indices.Add(indexOffset + 8 + 1);
+                        indices.Add(indexOffset + 8 + 2);
+                        
+                        indices.Add(indexOffset + 4);
+                        indices.Add(indexOffset + 3);
+                        indices.Add(indexOffset + 8 + 3);
+                        indices.Add(indexOffset + 4);
+                        indices.Add(indexOffset + 8 + 3);
+                        indices.Add(indexOffset + 8 + 4);
+                        
+                        indices.Add(indexOffset + 6);
+                        indices.Add(indexOffset + 5);
+                        indices.Add(indexOffset + 8 + 5);
+                        indices.Add(indexOffset + 6);
+                        indices.Add(indexOffset + 8 + 5);
+                        indices.Add(indexOffset + 8 + 6);
+                        
+                        indices.Add(indexOffset + 8);
+                        indices.Add(indexOffset + 7);
+                        indices.Add(indexOffset + 8 + 7);
+                        indices.Add(indexOffset);
+                        indices.Add(indexOffset + 7);
+                        indices.Add(indexOffset + 8);
                     }
 
                     // Debug.DrawLine(toStartPoint, toStartPoint + toStartPointRight, Color.green, 2f);
@@ -165,24 +213,72 @@ partial struct RailMeshBakingSystem : ISystem {
                     var upOffset = up * height;
 
                     var point = transform.TransformPoint(isStart ? curveP0 : curveP3);
-                    vertices.Add(point + rightOffset + upOffset);
-                    vertices.Add(point + rightOffset - upOffset);
-                    vertices.Add(point - rightOffset - upOffset);
-                    vertices.Add(point - rightOffset + upOffset);
-                    normals.AddReplicate(up, 4);
-                    uvs.Add(new float2(0, 0));
-                    uvs.Add(new float2(0, 1));
-                    uvs.Add(new float2(1, 1));
-                    uvs.Add(new float2(1, 0));
+                    var faceP0 = point + rightOffset + upOffset;
+                    var faceP1 = point + rightOffset - upOffset;
+                    var faceP2 = point - rightOffset - upOffset;
+                    var faceP3 = point - rightOffset + upOffset;
                     
+                    var faceN00 = up;
+                    var faceN01 = right;
+                    
+                    var faceN10 = right;
+                    var faceN11 = -up;
+                    
+                    var faceN20 = -up;
+                    var faceN21 = -right;
+                    
+                    var faceN30 = -right;
+                    var faceN31 = up;
+
+                    vertices.AddReplicate(faceP0, 2);
+                    vertices.AddReplicate(faceP1, 2);
+                    vertices.AddReplicate(faceP2, 2);
+                    vertices.AddReplicate(faceP3, 2);
+                    
+                    normals.Add(faceN00);
+                    normals.Add(faceN01);
+                    normals.Add(faceN10);
+                    normals.Add(faceN11);
+                    normals.Add(faceN20);
+                    normals.Add(faceN21);
+                    normals.Add(faceN30);
+                    normals.Add(faceN31);
+                    
+                    uvs.AddReplicate(new float2(0, 0),2);
+                    uvs.AddReplicate(new float2(0, 1),2);
+                    uvs.AddReplicate(new float2(1, 1),2);
+                    uvs.AddReplicate(new float2(1, 0),2);
+
                     // add indices
-                    var indexOffset = vertices.Length;
-                    indices.Add(indexOffset - 4);
-                    indices.Add(indexOffset - 3);
-                    indices.Add(indexOffset - 2);
-                    indices.Add(indexOffset - 4);
-                    indices.Add(indexOffset - 2);
-                    indices.Add(indexOffset - 1);
+                    var indexOffset = vertices.Length-16;
+                    if (indexOffset < 0) return;
+                    indices.Add(indexOffset + 2);
+                    indices.Add(indexOffset + 1);
+                    indices.Add(indexOffset + 8 + 1);
+                    indices.Add(indexOffset + 2);
+                    indices.Add(indexOffset + 8 + 1);
+                    indices.Add(indexOffset + 8 + 2);
+                    
+                    indices.Add(indexOffset + 4);
+                    indices.Add(indexOffset + 3);
+                    indices.Add(indexOffset + 8 + 3);
+                    indices.Add(indexOffset + 4);
+                    indices.Add(indexOffset + 8 + 3);
+                    indices.Add(indexOffset + 8 + 4);
+                    
+                    indices.Add(indexOffset + 6);
+                    indices.Add(indexOffset + 5);
+                    indices.Add(indexOffset + 8 + 5);
+                    indices.Add(indexOffset + 6);
+                    indices.Add(indexOffset + 8 + 5);
+                    indices.Add(indexOffset + 8 + 6);
+                    
+                    indices.Add(indexOffset + 8);
+                    indices.Add(indexOffset + 7);
+                    indices.Add(indexOffset + 8 + 7);
+                    indices.Add(indexOffset);
+                    indices.Add(indexOffset + 7);
+                    indices.Add(indexOffset + 8);
                 }
 
                 // should create start curve
@@ -222,50 +318,55 @@ partial struct RailMeshBakingSystem : ISystem {
                     // *---------------*
                     AddHalfCurve(false);
                 }
-
-
-                // for (var t = 0f; t <= 1f; t += 0.01f) {
-                //     // if middle then early out
-                //     if (t is > 0.1f and < 0.9f)
-                //         continue;
-                //
-                //
-                //     var splineT = spline.CurveToSplineT(curveIndex+spline.GetCurveInterpolation(curveIndex, t*spline.GetCurveLength(curveIndex)));
-                //     spline.Evaluate(splineT, out var position, out var tangent, out var normal);
-                //     // draw point
-                //     Debug.DrawLine(position, position + normal * 0.1f, Color.green, 2);
-                //     Debug.DrawLine(position, position + tangent * 0.1f, Color.blue, 2);
-                //
-                //     // set up quad
-                //     var bitangent = math.cross(tangent, normal);
-                //     var right = math.normalize(bitangent) * width;
-                //     var up = normal * height;
-                //     
-                //     vertices.Add(position + right + up);
-                //     vertices.Add(position + right - up);
-                //     vertices.Add(position - right - up);
-                //     vertices.Add(position - right + up);
-                //     
-                //     normals.AddReplicate(normal, 4);
-                //
-                //     uvs.Add(new float2(0, 0));
-                //     uvs.Add(new float2(0, 1));
-                //     uvs.Add(new float2(1, 1));
-                //     uvs.Add(new float2(1, 0));
-                // }
             }
+            
+            // add indices for end caps
+            var offset = vertices.Length;
+            vertices.Add(vertices[offset-7]);
+            vertices.Add(vertices[offset-5]);
+            vertices.Add(vertices[offset-3]);
+            vertices.Add(vertices[offset-1]);
+            normals.AddReplicate(math.normalize(spline[^1].Position - spline[^2].Position), 4);
+            uvs.Add(new float2(0, 0));
+            uvs.Add(new float2(0, 1));
+            uvs.Add(new float2(1, 1));
+            uvs.Add(new float2(1, 0));
+            
+            indices.Add(vertices.Length-1);
+            indices.Add(vertices.Length-2);
+            indices.Add(vertices.Length-3);
+            indices.Add(vertices.Length-3);
+            indices.Add(vertices.Length-4);
+            indices.Add(vertices.Length-1);
+            
+            vertices.Add(vertices[0]);
+            vertices.Add(vertices[2]);
+            vertices.Add(vertices[4]);
+            vertices.Add(vertices[6]);
+            normals.AddReplicate(math.normalize(spline[0].Position - spline[1].Position), 4);
+            uvs.Add(new float2(0, 0));
+            uvs.Add(new float2(0, 1));
+            uvs.Add(new float2(1, 1));
+            uvs.Add(new float2(1, 0));
 
-            // draw debug
-            for (var i = 0; i < vertices.Length; i++) { 
-                Debug.DrawLine(vertices[i], vertices[i] + normals[i] * 0.05f, Color.green, 2);
+            indices.Add(vertices.Length-4);
+            indices.Add(vertices.Length-3);
+            indices.Add(vertices.Length-2);
+            indices.Add(vertices.Length-2);
+            indices.Add(vertices.Length-1);
+            indices.Add(vertices.Length-4);
+            
+            // debug draw normals
+            for (int i = 0; i < vertices.Length; i++) {
+                Debug.DrawLine(vertices[i], vertices[i] + normals[i] * 0.1f, Color.red, 2f);
             }
-
+            
             // set mesh data
             var mesh = new Mesh();
             mesh.SetVertices(vertices.AsArray());
             mesh.SetNormals(normals.AsArray());
             mesh.SetUVs(0, uvs.AsArray());
-            mesh.SetIndices(indices.AsArray(), MeshTopology.Triangles, 0);
+            mesh.SetIndices(indices.ToArray(Allocator.Temp), MeshTopology.Triangles, 0);
             mesh.RecalculateBounds();
             
             // get urp default material
@@ -275,6 +376,7 @@ partial struct RailMeshBakingSystem : ISystem {
             var go = new GameObject("SplineMesh");
             go.AddComponent<MeshFilter>().sharedMesh = mesh;
             go.AddComponent<MeshRenderer>().sharedMaterial = material;
+            material.color = new Color(0.65f, 0.5f, 0.6f);
         }
     }
     
