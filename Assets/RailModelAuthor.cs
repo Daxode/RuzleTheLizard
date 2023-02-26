@@ -17,6 +17,7 @@ public class RailModelAuthor : MonoBehaviour {
     class Baker : Baker<RailModelAuthor> {
         public override void Bake(RailModelAuthor auth) {
             var spline = GetComponent<SplineContainer>(auth);
+            DependsOn(auth.transform);
             AddComponent(new RailSpline {spline = new NativeSpline(spline.Spline, Allocator.Persistent)});
             AddComponent(new RailModelInfo {
                 height = auth.height, width = auth.width, 
@@ -129,23 +130,32 @@ partial struct RailMeshBakingSystem : ISystem {
                         uvs.Add(new float2(0, 1));
                         uvs.Add(new float2(1, 1));
                         uvs.Add(new float2(1, 0));
+                        
+                        // add indices
+                        var indexOffset = vertices.Length;
+                        indices.Add(indexOffset - 4);
+                        indices.Add(indexOffset - 3);
+                        indices.Add(indexOffset - 2);
+                        indices.Add(indexOffset - 4);
+                        indices.Add(indexOffset - 2);
+                        indices.Add(indexOffset - 1);
                     }
 
-                    Debug.DrawLine(toStartPoint, toStartPoint + toStartPointRight, Color.green, 2f);
-                    Debug.DrawLine(toEndPoint, toEndPoint + toEndPointRight, Color.red, 2f);
-                    Debug.DrawLine(middlePoint, middlePoint + (float3)toStartPlane.normal*1f, Color.green, 2f);
-                    Debug.DrawLine(middlePoint, middlePoint + (float3)toEndPlane.normal*1f, Color.red, 2f);
-                    Debug.DrawLine(middlePoint+toStartDirectionWithMagnitude, pivot, Color.blue, 2f);
-                    
-                    // draw planes (planeBetweenStartAndP0 and planeBetweenP0AndP3)
-                    DebugDrawPlane(middlePoint+toStartDirectionWithMagnitude, toStartPlane, up, 1, Color.green);
-                    DebugDrawPlane(middlePoint+toEndDirectionWithMagnitude, toEndPlane, up, 1, Color.red);
-                    Debug.DrawLine(toStartPoint, toStartPoint + up, Color.green, 2f);
-                    Debug.DrawLine(toEndPoint, toEndPoint + up, Color.red, 2f);
+                    // Debug.DrawLine(toStartPoint, toStartPoint + toStartPointRight, Color.green, 2f);
+                    // Debug.DrawLine(toEndPoint, toEndPoint + toEndPointRight, Color.red, 2f);
+                    // Debug.DrawLine(middlePoint, middlePoint + (float3)toStartPlane.normal*1f, Color.green, 2f);
+                    // Debug.DrawLine(middlePoint, middlePoint + (float3)toEndPlane.normal*1f, Color.red, 2f);
+                    // Debug.DrawLine(middlePoint+toStartDirectionWithMagnitude, pivot, Color.blue, 2f);
+                    //
+                    // // draw planes (planeBetweenStartAndP0 and planeBetweenP0AndP3)
+                    // DebugDrawPlane(middlePoint+toStartDirectionWithMagnitude, toStartPlane, up, 1, Color.green);
+                    // DebugDrawPlane(middlePoint+toEndDirectionWithMagnitude, toEndPlane, up, 1, Color.red);
+                    // Debug.DrawLine(toStartPoint, toStartPoint + up, Color.green, 2f);
+                    // Debug.DrawLine(toEndPoint, toEndPoint + up, Color.red, 2f);
                 }
                 
                 void AddStub(bool isStart) {
-                    var forward = curveP3 - curveP0;
+                    var forward = curveP0-curveP3;
                     forward = math.normalize(forward);
                     var knot = spline[curveIndex + (isStart ? 0 : 1)];
                     var up = math.mul(knot.Rotation, math.up());
@@ -159,8 +169,20 @@ partial struct RailMeshBakingSystem : ISystem {
                     vertices.Add(point + rightOffset - upOffset);
                     vertices.Add(point - rightOffset - upOffset);
                     vertices.Add(point - rightOffset + upOffset);
-
                     normals.AddReplicate(up, 4);
+                    uvs.Add(new float2(0, 0));
+                    uvs.Add(new float2(0, 1));
+                    uvs.Add(new float2(1, 1));
+                    uvs.Add(new float2(1, 0));
+                    
+                    // add indices
+                    var indexOffset = vertices.Length;
+                    indices.Add(indexOffset - 4);
+                    indices.Add(indexOffset - 3);
+                    indices.Add(indexOffset - 2);
+                    indices.Add(indexOffset - 4);
+                    indices.Add(indexOffset - 2);
+                    indices.Add(indexOffset - 1);
                 }
 
                 // should create start curve
@@ -237,6 +259,22 @@ partial struct RailMeshBakingSystem : ISystem {
             for (var i = 0; i < vertices.Length; i++) { 
                 Debug.DrawLine(vertices[i], vertices[i] + normals[i] * 0.05f, Color.green, 2);
             }
+
+            // set mesh data
+            var mesh = new Mesh();
+            mesh.SetVertices(vertices.AsArray());
+            mesh.SetNormals(normals.AsArray());
+            mesh.SetUVs(0, uvs.AsArray());
+            mesh.SetIndices(indices.AsArray(), MeshTopology.Triangles, 0);
+            mesh.RecalculateBounds();
+            
+            // get urp default material
+            var material = new Material(Shader.Find("Universal Render Pipeline/Lit"));
+
+            // Create a GameObject with the mesh;
+            var go = new GameObject("SplineMesh");
+            go.AddComponent<MeshFilter>().sharedMesh = mesh;
+            go.AddComponent<MeshRenderer>().sharedMaterial = material;
         }
     }
     
