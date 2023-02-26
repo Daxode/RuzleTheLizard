@@ -1,5 +1,9 @@
-﻿using Unity.Collections;
+﻿using System;
+using Unity.Burst;
+using Unity.Collections;
+using Unity.Collections.LowLevel.Unsafe;
 using Unity.Entities;
+using Unity.Entities.Graphics;
 using Unity.Mathematics;
 using Unity.Rendering;
 using Unity.Transforms;
@@ -23,7 +27,7 @@ public class RailModelAuthor : MonoBehaviour {
                 height = auth.height, width = auth.width, 
                 cornerRadius = auth.cornerRadius, cornerSegments = auth.cornerSegments
             });
-            AddComponentObject(new RailModel {material = auth.material});
+            AddComponentObject(new RailMaterialInfo {material = DependsOn(auth.material)});
         }
     }
 }
@@ -41,18 +45,71 @@ struct RailSpline : IComponentData {
 }
 
 [BakingType]
-class RailModel : IComponentData {
-    public Mesh mesh;
+class RailMaterialInfo : IComponentData {
     public Material material;
 }
 
 // Create system to bake the rail mesh
 // mesh is created from a spline
 // the sampling is non-uniform, with more samples at Knots
-
 [WorldSystemFilter(WorldSystemFilterFlags.BakingSystem)]
 partial struct RailMeshBakingSystem : ISystem {
+    public struct Singleton : IComponentData {
+        public NativeList<UnsafeMeshData> meshes;
+    }
+
+    public struct UnsafeMeshData : IDisposable {
+        UnsafeList<float3> vertices;
+        UnsafeList<int> indices;
+        UnsafeList<float3> normals;
+        UnsafeList<float2> uvs;
+
+        public UnsafeMeshData(UnsafeList<float3> vertices, UnsafeList<int> indices, UnsafeList<float3> normals, UnsafeList<float2> uvs) {
+            this.vertices = vertices;
+            this.indices = indices;
+            this.normals = normals;
+            this.uvs = uvs;
+        }
+
+        public unsafe Mesh ToMesh() {
+            var mesh = new Mesh();
+            mesh.SetVertices(CollectionHelper.ConvertExistingDataToNativeArray<float3>(vertices.Ptr, vertices.Length, Allocator.Temp, true));
+            mesh.SetIndices(CollectionHelper.ConvertExistingDataToNativeArray<int>(indices.Ptr, indices.Length, Allocator.Temp, true), MeshTopology.Triangles, 0);
+            mesh.SetNormals(CollectionHelper.ConvertExistingDataToNativeArray<float3>(normals.Ptr, normals.Length, Allocator.Temp, true));
+            mesh.SetUVs(0, CollectionHelper.ConvertExistingDataToNativeArray<float2>(uvs.Ptr, uvs.Length, Allocator.Temp, true));
+            mesh.RecalculateBounds();
+            return mesh;
+        }
+
+        public void Dispose() {
+            vertices.Dispose();
+            indices.Dispose();
+            normals.Dispose();
+            uvs.Dispose();
+        }
+    }
+
+    [BurstCompile]
+    public void OnCreate(ref SystemState state) {
+        state.EntityManager.AddComponentData(state.SystemHandle, new Singleton() {
+            meshes = new NativeList<UnsafeMeshData>(Allocator.Persistent),
+        });
+    }
+    
+    public void OnDestroy(ref SystemState state) {
+        var singleton = state.EntityManager.GetComponentData<Singleton>(state.SystemHandle);
+        foreach (var meshData in singleton.meshes) 
+            meshData.Dispose();
+        singleton.meshes.Dispose();
+    }
+
+    [BurstCompile]
     public void OnUpdate(ref SystemState state) {
+        var singleton = state.EntityManager.GetComponentData<Singleton>(state.SystemHandle);
+        foreach (var meshData in singleton.meshes)
+            meshData.Dispose();
+        singleton.meshes.Clear();
+        
         foreach (var (railSpline, transform, railModelInfo) in SystemAPI
                      .Query<RailSpline, LocalTransform, RailModelInfo>()) {
             var spline = railSpline.spline;
@@ -62,10 +119,10 @@ partial struct RailMeshBakingSystem : ISystem {
             var cornerSegments = railModelInfo.cornerSegments;
             var metersPerSegment = 0.1f;
 
-            var vertices = new NativeList<float3>(Allocator.Temp);
-            var indices = new NativeList<int>(Allocator.Temp);
-            var normals = new NativeList<float3>(Allocator.Temp);
-            var uvs = new NativeList<float2>(Allocator.Temp);
+            var vertices = new UnsafeList<float3>(256, Allocator.Temp);
+            var indices = new UnsafeList<int>(256*2, Allocator.Temp);
+            var normals = new UnsafeList<float3>(256, Allocator.Temp);
+            var uvs = new UnsafeList<float2>(256, Allocator.Temp);
 
             // Add vertices
             var curveCount = spline.GetCurveCount();
@@ -357,26 +414,11 @@ partial struct RailMeshBakingSystem : ISystem {
             indices.Add(vertices.Length-4);
             
             // debug draw normals
-            for (int i = 0; i < vertices.Length; i++) {
-                Debug.DrawLine(vertices[i], vertices[i] + normals[i] * 0.1f, Color.red, 2f);
-            }
+            // for (int i = 0; i < vertices.Length; i++) {
+            //     Debug.DrawLine(vertices[i], vertices[i] + normals[i] * 0.1f, Color.red, 2f);
+            // }
             
-            // set mesh data
-            var mesh = new Mesh();
-            mesh.SetVertices(vertices.AsArray());
-            mesh.SetNormals(normals.AsArray());
-            mesh.SetUVs(0, uvs.AsArray());
-            mesh.SetIndices(indices.ToArray(Allocator.Temp), MeshTopology.Triangles, 0);
-            mesh.RecalculateBounds();
-            
-            // get urp default material
-            var material = new Material(Shader.Find("Universal Render Pipeline/Lit"));
-
-            // Create a GameObject with the mesh;
-            var go = new GameObject("SplineMesh");
-            go.AddComponent<MeshFilter>().sharedMesh = mesh;
-            go.AddComponent<MeshRenderer>().sharedMaterial = material;
-            material.color = new Color(0.65f, 0.5f, 0.6f);
+            singleton.meshes.Add(new UnsafeMeshData(vertices, indices, normals, uvs));;
         }
     }
     
@@ -395,6 +437,46 @@ partial struct RailMeshBakingSystem : ISystem {
         Debug.DrawLine(p3, p0, color, duration);
     }
 }
+
+// unsafe mesh data to mesh baking system
+[WorldSystemFilter(WorldSystemFilterFlags.BakingSystem)]
+[UpdateAfter(typeof(RailMeshBakingSystem))]
+partial struct MeshBakingSystem : ISystem {
+    public void OnUpdate(ref SystemState state) {
+        var railMeshBakingSystemSingleton = SystemAPI.GetSingleton<RailMeshBakingSystem.Singleton>();
+        var ecb = new EntityCommandBuffer(Allocator.Temp);
+        var meshIndex = 0;
+        foreach (var (railSpline, transform, railModelInfo, railMaterialInfo, entity) in SystemAPI
+                     .Query<RailSpline, LocalTransform, RailModelInfo, RailMaterialInfo>().WithEntityAccess()) {
+            using var meshData = railMeshBakingSystemSingleton.meshes[meshIndex];
+            var mesh = meshData.ToMesh();
+            ecb.AddSharedComponentManaged(entity, new RenderMesh {
+                mesh = mesh,
+                material = railMaterialInfo.material,
+            });
+            ecb.AddSharedComponentManaged(entity, RenderFilterSettings.Default);
+            ecb.AddComponent(entity, new RenderBounds { Value = mesh.bounds.ToAABB() });
+            ecb.AddComponent<WorldRenderBounds>(entity);
+            ecb.AddComponent<LocalToWorld>(entity);
+            ecb.AddComponent<MaterialMeshInfo>(entity);
+            ecb.AddComponent<RenderBounds>(entity);
+            ecb.AddComponent<WorldToLocal_Tag>(entity);
+            ecb.AddComponent(entity, ComponentType.ChunkComponent<ChunkWorldRenderBounds>());
+            ecb.AddComponent(entity, ComponentType.ChunkComponent<EntitiesGraphicsChunkInfo>());
+            ecb.AddComponent<PerInstanceCullingTag>(entity);
+            ecb.AddComponent(entity, ComponentType.ReadWrite<RenderMeshArray>());
+            // debug draw mesh
+            for (var j = 0; j < mesh.vertexCount; j++) {
+                Debug.DrawLine(mesh.vertices[j], mesh.vertices[j] + mesh.normals[j] * 0.1f, Color.red, 2f);
+            }
+            
+            meshIndex++;
+        }
+        ecb.Playback(state.EntityManager);
+    }
+}
+
+
 
 [WorldSystemFilter(WorldSystemFilterFlags.BakingSystem)]
 partial struct RailModelRenderArrayBakingSystem : ISystem {
