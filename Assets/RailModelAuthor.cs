@@ -5,11 +5,16 @@ using Unity.Collections.LowLevel.Unsafe;
 using Unity.Entities;
 using Unity.Entities.Graphics;
 using Unity.Mathematics;
+using Unity.Physics;
 using Unity.Rendering;
 using Unity.Transforms;
 using UnityEngine;
 using UnityEngine.Rendering;
 using UnityEngine.Splines;
+using Material = UnityEngine.Material;
+using MeshCollider = Unity.Physics.MeshCollider;
+using Plane = UnityEngine.Plane;
+using Ray = UnityEngine.Ray;
 
 [RequireComponent(typeof(SplineContainer))]
 public class RailModelAuthor : MonoBehaviour {
@@ -17,6 +22,7 @@ public class RailModelAuthor : MonoBehaviour {
     public float width = 1;
     public float cornerRadius = 0.05f;
     public int cornerSegments = 8;
+    public bool hasCollider;
     public Material material;
     
     class Baker : Baker<RailModelAuthor> {
@@ -26,7 +32,8 @@ public class RailModelAuthor : MonoBehaviour {
             AddComponent(new RailSpline {spline = new NativeSpline(spline.Spline, Allocator.Persistent)});
             AddComponent(new RailModelInfo {
                 height = auth.height, width = auth.width, 
-                cornerRadius = auth.cornerRadius, cornerSegments = auth.cornerSegments
+                cornerRadius = auth.cornerRadius, cornerSegments = auth.cornerSegments,
+                hasCollider = auth.hasCollider
             });
             AddComponentObject(new RailMaterialInfo {material = DependsOn(auth.material)});
         }
@@ -38,6 +45,7 @@ struct RailModelInfo : IComponentData {
     public float width;
     public float cornerRadius;
     public int cornerSegments;
+    public bool hasCollider;
 }
 
 [TemporaryBakingType]
@@ -80,6 +88,13 @@ partial struct RailMeshBakingSystem : ISystem {
             mesh.SetUVs(0, CollectionHelper.ConvertExistingDataToNativeArray<float2>(uvs.Ptr, uvs.Length, Allocator.Temp, true));
             mesh.RecalculateBounds();
             return mesh;
+        }
+        
+        // to mesh collider
+        public unsafe BlobAssetReference<Unity.Physics.Collider> ToMeshCollider() {
+            return MeshCollider.Create(
+                CollectionHelper.ConvertExistingDataToNativeArray<float3>(vertices.Ptr, vertices.Length, Allocator.Temp, true),
+                CollectionHelper.ConvertExistingDataToNativeArray<int>(indices.Ptr, indices.Length, Allocator.Temp, true).Reinterpret<int3>(sizeof(int)));
         }
 
         public void Dispose() {
@@ -448,6 +463,7 @@ partial struct MeshBakingSystem : ISystem {
         var meshIndex = 0;
         foreach (var entity in SystemAPI.QueryBuilder().WithAll<RailSpline>().Build().ToEntityArray(Allocator.TempJob)) {
             var railMaterialInfo = SystemAPI.ManagedAPI.GetComponent<RailMaterialInfo>(entity);
+            var railModelInfo = SystemAPI.GetComponent<RailModelInfo>(entity);
             using var meshData = railMeshBakingSystemSingleton.meshes[meshIndex];
             var mesh = meshData.ToMesh();
             var renderMeshArray = new RenderMeshArray(new[] { railMaterialInfo.material }, new[] { mesh });
@@ -455,7 +471,13 @@ partial struct MeshBakingSystem : ISystem {
             var meshDescription = new RenderMeshDescription(ShadowCastingMode.On, true, layer: 0);
             RenderMeshUtility.AddComponents(entity, state.EntityManager, in meshDescription, renderMeshArray, 
                 MaterialMeshInfo.FromRenderMeshArrayIndices(0, 0));
-
+            
+            // add mesh collider
+            if (railModelInfo.hasCollider) {
+                var collider = meshData.ToMeshCollider();
+                state.EntityManager.AddComponent(entity, ComponentType.ReadOnly<PhysicsWorldIndex>());
+                state.EntityManager.AddComponentData(entity, new PhysicsCollider { Value = collider });
+            }
             // debug draw mesh
             // for (var j = 0; j < mesh.vertexCount; j++) {
             //     Debug.DrawLine(mesh.vertices[j], mesh.vertices[j] + mesh.normals[j] * 0.1f, Color.red, 2f);
