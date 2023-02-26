@@ -8,6 +8,7 @@ using Unity.Mathematics;
 using Unity.Rendering;
 using Unity.Transforms;
 using UnityEngine;
+using UnityEngine.Rendering;
 using UnityEngine.Splines;
 
 [RequireComponent(typeof(SplineContainer))]
@@ -136,9 +137,9 @@ partial struct RailMeshBakingSystem : ISystem {
                     var startPoint = isStart ? spline[curveIndex - 1].Position : curveP0;
                     var middlePoint = isStart ? curveP0 : curveP3;
                     var endPoint = isStart ? curveP3 : spline[curveIndex + 2].Position;
-                    startPoint = transform.TransformPoint(startPoint);
-                    middlePoint = transform.TransformPoint(middlePoint);
-                    endPoint = transform.TransformPoint(endPoint);
+                    // startPoint = transform.TransformPoint(startPoint);
+                    // middlePoint = transform.TransformPoint(middlePoint);
+                    // endPoint = transform.TransformPoint(endPoint);
 
                     var knot = spline[curveIndex + (isStart ? 0 : 1)];
                     var up = math.mul(knot.Rotation, math.up());
@@ -269,7 +270,7 @@ partial struct RailMeshBakingSystem : ISystem {
                     var rightOffset = right * width;
                     var upOffset = up * height;
 
-                    var point = transform.TransformPoint(isStart ? curveP0 : curveP3);
+                    var point = isStart ? curveP0 : curveP3;
                     var faceP0 = point + rightOffset + upOffset;
                     var faceP1 = point + rightOffset - upOffset;
                     var faceP2 = point - rightOffset - upOffset;
@@ -444,35 +445,24 @@ partial struct RailMeshBakingSystem : ISystem {
 partial struct MeshBakingSystem : ISystem {
     public void OnUpdate(ref SystemState state) {
         var railMeshBakingSystemSingleton = SystemAPI.GetSingleton<RailMeshBakingSystem.Singleton>();
-        var ecb = new EntityCommandBuffer(Allocator.Temp);
         var meshIndex = 0;
-        foreach (var (railSpline, transform, railModelInfo, railMaterialInfo, entity) in SystemAPI
-                     .Query<RailSpline, LocalTransform, RailModelInfo, RailMaterialInfo>().WithEntityAccess()) {
+        foreach (var entity in SystemAPI.QueryBuilder().WithAll<RailSpline>().Build().ToEntityArray(Allocator.TempJob)) {
+            var railMaterialInfo = SystemAPI.ManagedAPI.GetComponent<RailMaterialInfo>(entity);
             using var meshData = railMeshBakingSystemSingleton.meshes[meshIndex];
             var mesh = meshData.ToMesh();
-            ecb.AddSharedComponentManaged(entity, new RenderMesh {
-                mesh = mesh,
-                material = railMaterialInfo.material,
-            });
-            ecb.AddSharedComponentManaged(entity, RenderFilterSettings.Default);
-            ecb.AddComponent(entity, new RenderBounds { Value = mesh.bounds.ToAABB() });
-            ecb.AddComponent<WorldRenderBounds>(entity);
-            ecb.AddComponent<LocalToWorld>(entity);
-            ecb.AddComponent<MaterialMeshInfo>(entity);
-            ecb.AddComponent<RenderBounds>(entity);
-            ecb.AddComponent<WorldToLocal_Tag>(entity);
-            ecb.AddComponent(entity, ComponentType.ChunkComponent<ChunkWorldRenderBounds>());
-            ecb.AddComponent(entity, ComponentType.ChunkComponent<EntitiesGraphicsChunkInfo>());
-            ecb.AddComponent<PerInstanceCullingTag>(entity);
-            ecb.AddComponent(entity, ComponentType.ReadWrite<RenderMeshArray>());
+            var renderMeshArray = new RenderMeshArray(new[] { railMaterialInfo.material }, new[] { mesh });
+            state.EntityManager.AddSharedComponentManaged(entity, renderMeshArray);
+            var meshDescription = new RenderMeshDescription(ShadowCastingMode.On, true, layer: 0);
+            RenderMeshUtility.AddComponents(entity, state.EntityManager, in meshDescription, renderMeshArray, 
+                MaterialMeshInfo.FromRenderMeshArrayIndices(0, 0));
+
             // debug draw mesh
-            for (var j = 0; j < mesh.vertexCount; j++) {
-                Debug.DrawLine(mesh.vertices[j], mesh.vertices[j] + mesh.normals[j] * 0.1f, Color.red, 2f);
-            }
+            // for (var j = 0; j < mesh.vertexCount; j++) {
+            //     Debug.DrawLine(mesh.vertices[j], mesh.vertices[j] + mesh.normals[j] * 0.1f, Color.red, 2f);
+            // }
             
             meshIndex++;
         }
-        ecb.Playback(state.EntityManager);
     }
 }
 
